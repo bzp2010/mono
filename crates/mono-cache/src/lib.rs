@@ -13,14 +13,8 @@ mod confine;
 mod key;
 mod local;
 
-pub use key::{dir_key, expand_files, output_digest, remove_matching, remove_stale, task_key};
+pub use key::{expand_files, output_digest, remove_matching, remove_stale, task_key};
 pub use local::LocalBackend;
-
-/// Checks a `cacheDirs` name without touching the filesystem. The runner calls it
-/// before the cache is consulted, so an invalid name is refused on every run.
-pub fn check_cache_dir(dir: &str) -> Result<(), CacheError> {
-    confine::check_dir_name(Path::new(dir))
-}
 
 /// Errors raised by cache keys and backends.
 #[derive(Debug, Error)]
@@ -48,18 +42,11 @@ pub enum CacheError {
 /// Storage for task outputs, addressed by cache key. Every relative path is
 /// interpreted inside `project_root`.
 pub trait CacheBackend {
-    /// Whether a complete entry exists for `key`.
+    /// Whether an entry exists for `key`. An entry only exists once it is complete.
     fn contains(&self, key: &str) -> Result<bool, CacheError>;
-    /// The file paths stored under `key`, relative to the project root. Empty on a miss.
-    fn stored_files(&self, key: &str) -> Result<Vec<PathBuf>, CacheError>;
-    /// Restores the entry for `key` into `project_root`. Returns `false` on a miss.
-    fn get(&self, key: &str, project_root: &Path) -> Result<bool, CacheError>;
-    /// Stores the files at `rel_paths` under `key`.
+    /// Restores the entry for `key` into `project_root`. Returns the files restored,
+    /// relative to the project root, or `None` on a miss.
+    fn get(&self, key: &str, project_root: &Path) -> Result<Option<Vec<PathBuf>>, CacheError>;
+    /// Stores the files at `rel_paths` under `key`. The first entry for a key wins.
     fn put(&self, key: &str, project_root: &Path, rel_paths: &[PathBuf]) -> Result<(), CacheError>;
-    /// Restores the tree stored under `key` into `rel_dir` of `project_root`.
-    /// Returns `false` on a miss.
-    fn get_dir(&self, key: &str, project_root: &Path, rel_dir: &Path) -> Result<bool, CacheError>;
-    /// Stores the tree at `rel_dir` of `project_root` under `key`. A missing
-    /// directory is a no-op.
-    fn put_dir(&self, key: &str, project_root: &Path, rel_dir: &Path) -> Result<(), CacheError>;
 }

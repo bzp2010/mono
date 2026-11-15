@@ -117,35 +117,7 @@ impl Tree {
     pub(crate) fn install_file(&self, src: &Path, rel: &Path) -> Result<(), CacheError> {
         check_relative_path(rel)?;
         self.prepare_parents(rel)?;
-        let dst = self.root.join(rel);
-        clear_real_directory(&dst)?;
-        copy_atomic(src, &dst)
-    }
-
-    /// Installs a symbolic link at `rel` that points to `target`.
-    pub(crate) fn install_link(&self, target: &Path, rel: &Path) -> Result<(), CacheError> {
-        check_relative_path(rel)?;
-        self.prepare_parents(rel)?;
-        let dst = self.root.join(rel);
-        clear_real_directory(&dst)?;
-        link_atomic(target, &dst)
-    }
-
-    /// Ensures a real directory exists at `rel`, replacing a link or file there.
-    pub(crate) fn make_dir(&self, rel: &Path) -> Result<(), CacheError> {
-        check_relative_path(rel)?;
-        self.prepare_parents(rel)?;
-        let dst = self.root.join(rel);
-        match fs::symlink_metadata(&dst) {
-            Ok(meta) if meta.is_dir() => Ok(()),
-            // A failed removal surfaces from create_dir below, so it is not reported here.
-            Ok(_) => {
-                remove_non_directory(&dst)?;
-                create_dir(&dst)
-            }
-            Err(e) if e.kind() == io::ErrorKind::NotFound => create_dir(&dst),
-            Err(source) => Err(CacheError::Io { path: dst, source }),
-        }
+        copy_atomic(src, &self.root.join(rel))
     }
 
     /// Every entry beneath `under`, relative to it, with the directory itself as
@@ -164,11 +136,16 @@ impl Tree {
             return Err(CacheError::NotADirectory { path: base });
         }
         let mut out = vec![(PathBuf::new(), EntryKind::Dir)];
-        for entry in WalkDir::new(&base).follow_links(false).min_depth(1) {
+        // The root is not skipped with min_depth: with min_depth, a root that vanishes
+        // while it is read yields no error, so the walk would look empty and succeed.
+        for entry in WalkDir::new(&base).follow_links(false) {
             let entry = entry.map_err(|e| CacheError::Io {
                 path: base.clone(),
                 source: e.into(),
             })?;
+            if entry.depth() == 0 {
+                continue;
+            }
             let rel = entry
                 .path()
                 .strip_prefix(&base)
@@ -190,6 +167,9 @@ impl Tree {
             };
             out.push((rel, kind));
         }
+        // WalkDir can end quietly when the root vanishes while it is read. Checking the
+        // root again catches that: if it still exists here, the listing is complete.
+        fs::symlink_metadata(&base).map_err(|source| CacheError::Io { path: base.clone(), source })?;
         Ok(out)
     }
 
@@ -311,23 +291,13 @@ fn clear_real_directory(dst: &Path) -> Result<(), CacheError> {
     }
 }
 
-/// Cache directory names must be non-empty and made of normal components only,
-/// so `""`, `.`, `..`, and absolute paths are rejected before any work is done.
-pub(crate) fn check_dir_name(rel: &Path) -> Result<(), CacheError> {
-    let plain = rel.components().next().is_some()
-        && rel.components().all(|c| matches!(c, Component::Normal(_)));
-    if plain {
-        Ok(())
-    } else {
-        Err(CacheError::OutsideProject { pattern: rel.display().to_string() })
-    }
-}
-
 /// Copies `src` to `dst` through a uniquely named temporary file in the same
 /// directory, keeping the source permissions. Renaming avoids ETXTBSY when `dst`
 /// is a running binary.
 fn copy_atomic(src: &Path, dst: &Path) -> Result<(), CacheError> {
     let parent = dst.parent().unwrap_or(Path::new("."));
+    // The source is opened and copied before any existing directory at `dst` is
+    // touched, so a source that vanished does not leave `dst` half destroyed.
     let mut tmp = tempfile::NamedTempFile::new_in(parent)
         .map_err(|source| CacheError::Io { path: parent.to_path_buf(), source })?;
     let mut from = fs::File::open(src).map_err(|source| CacheError::Io { path: src.to_path_buf(), source })?;
@@ -338,29 +308,8 @@ fn copy_atomic(src: &Path, dst: &Path) -> Result<(), CacheError> {
         .permissions();
     fs::set_permissions(tmp.path(), mode)
         .map_err(|source| CacheError::Io { path: tmp.path().to_path_buf(), source })?;
+    clear_real_directory(dst)?;
     tmp.persist(dst)
         .map_err(|e| CacheError::Io { path: dst.to_path_buf(), source: e.error })?;
     Ok(())
-}
-
-/// Creates a symbolic link at `dst` through a temporary link that is renamed into place.
-fn link_atomic(target: &Path, dst: &Path) -> Result<(), CacheError> {
-    let parent = dst.parent().unwrap_or(Path::new("."));
-    for attempt in 0..1000u32 {
-        let tmp = parent.join(format!(".mono-link-{}-{attempt}", std::process::id()));
-        match std::os::unix::fs::symlink(target, &tmp) {
-            Ok(()) => {
-                return fs::rename(&tmp, dst).map_err(|source| {
-                    let _ = fs::remove_file(&tmp);
-                    CacheError::Io { path: dst.to_path_buf(), source }
-                });
-            }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(source) => return Err(CacheError::Io { path: tmp, source }),
-        }
-    }
-    Err(CacheError::Io {
-        path: dst.to_path_buf(),
-        source: io::Error::other("could not find a free temporary link name"),
-    })
 }

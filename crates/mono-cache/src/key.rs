@@ -70,15 +70,6 @@ pub fn task_key(
     Ok(hex(&h.finalize()))
 }
 
-/// Key for a `cacheDirs` entry: the target key combined with the directory
-/// path, so one target can cache several directories without collisions.
-pub fn dir_key(target_key: &str, dir: &str) -> String {
-    let mut h = Sha256::new();
-    feed(&mut h, "target-key", target_key.as_bytes());
-    feed(&mut h, "cache-dir", dir.as_bytes());
-    hex(&h.finalize())
-}
-
 /// Digest over the paths and contents of output files, in sorted path order.
 pub fn output_digest(project_root: &Path, rel_paths: &[PathBuf]) -> Result<String, CacheError> {
     let tree = Tree::new(project_root);

@@ -4,10 +4,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
-use mono_cache::{
-    check_cache_dir, dir_key, expand_files, output_digest, remove_stale, task_key, CacheBackend,
-    CacheError,
-};
+use mono_cache::{expand_files, output_digest, remove_stale, task_key, CacheBackend, CacheError};
 use mono_graph::{task_dependencies, GraphError, ProjectGraph, TaskId};
 use thiserror::Error;
 
@@ -84,42 +81,19 @@ pub fn run_plan(
             .collect();
         let key = task_key(task, config, root, &dep_contributions)?;
         let cacheable = cache.is_some() && !config.outputs.is_empty();
-        // Checked before the cache is consulted, so a bad name is refused on a hit too.
-        for dir in &config.cache_dirs {
-            check_cache_dir(dir)?;
-        }
 
-        // A hit restores the snapshot first, then removes outputs that are not part
-        // of it. A miss leaves existing outputs alone, because the command may be
-        // incremental and rely on them.
-        let cached = match cache {
-            Some(backend) if cacheable && backend.contains(&key)? => {
-                let restored = backend.get(&key, root)?;
-                if restored {
-                    let keep = backend.stored_files(&key)?;
-                    remove_stale(root, &config.outputs, &keep)?;
+        // A hit restores the outputs, then removes files that were outputs of an
+        // earlier version but are not part of this entry. A miss leaves existing
+        // outputs alone, because the command may be incremental and rely on them.
+        let outcome = match cache {
+            Some(backend) if cacheable => match backend.get(&key, root)? {
+                Some(restored) => {
+                    remove_stale(root, &config.outputs, &restored)?;
+                    TaskOutcome::Cached
                 }
-                restored
-            }
-            _ => false,
-        };
-        let outcome = if cached {
-            TaskOutcome::Cached
-        } else {
-            // The command always runs. Tool-owned directories are restored
-            // before it, so the tool can use its own incremental state.
-            if let Some(backend) = cache {
-                for dir in &config.cache_dirs {
-                    backend.get_dir(&dir_key(&key, dir), root, Path::new(dir))?;
-                }
-            }
-            let outcome = run_task(task, root, &config.command)?;
-            if let (Some(backend), TaskOutcome::Success) = (cache, &outcome) {
-                for dir in &config.cache_dirs {
-                    backend.put_dir(&dir_key(&key, dir), root, Path::new(dir))?;
-                }
-            }
-            outcome
+                None => run_task(task, root, &config.command)?,
+            },
+            _ => run_task(task, root, &config.command)?,
         };
 
         let rel = expand_files(root, &config.outputs)?;

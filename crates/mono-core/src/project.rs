@@ -31,9 +31,6 @@ pub struct TargetConfig {
     /// `^name` refers to the same target in dependencies, `name` to this project.
     #[serde(rename = "dependsOn", default)]
     pub depends_on: Vec<String>,
-    /// Directories saved and restored as a whole, never hashed.
-    #[serde(rename = "cacheDirs", default)]
-    pub cache_dirs: Vec<String>,
 }
 
 /// Parses the contents of a `project.json` file.
