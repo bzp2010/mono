@@ -198,3 +198,36 @@ fn empty_directories_survive_a_round_trip() {
     assert!(backend.get_dir("kd", &l.project, Path::new("tree")).unwrap());
     assert!(tree.join("empty/nested").is_dir());
 }
+
+fn running_as_root() -> bool {
+    fs::read_to_string("/proc/self/status")
+        .map(|s| s.lines().any(|l| l.starts_with("Uid:") && l.split_whitespace().nth(1) == Some("0")))
+        .unwrap_or(false)
+}
+
+#[test]
+fn a_failed_link_removal_never_writes_through_the_link() {
+    // The parent is read-only, so removing the link inside it fails. The restore
+    // must report the failure and must not write into the outside directory.
+    use std::os::unix::fs::PermissionsExt;
+    if running_as_root() {
+        return; // root ignores the permission bits this test depends on
+    }
+    let l = layout();
+    let ro = l.project.join("ro");
+    fs::create_dir_all(&ro).unwrap();
+    std::os::unix::fs::symlink(&l.outside, ro.join("a")).unwrap();
+    let backend = LocalBackend::new(l.store.path().to_path_buf());
+    let src = l.project.join("src");
+    fs::create_dir_all(src.join("b")).unwrap();
+    fs::write(src.join("b/payload.txt"), "payload").unwrap();
+    backend.put_dir("kn1", &l.project, Path::new("src")).unwrap();
+
+    fs::set_permissions(&ro, fs::Permissions::from_mode(0o555)).unwrap();
+    let result = backend.get_dir("kn1", &l.project, Path::new("ro/a"));
+    fs::set_permissions(&ro, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(result.is_err());
+    assert!(!l.outside.join("b").exists(), "nothing may be written through the link");
+    assert!(outside_unchanged(&l));
+}

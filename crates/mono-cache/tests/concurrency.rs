@@ -64,10 +64,13 @@ fn readers_never_see_a_partial_entry_while_it_is_republished() {
                 let rel = format!("restored-{i}");
                 let dest = root.join(&rel);
                 for _ in 0..30 {
-                    // A restore into a fresh destination must find the complete entry.
+                    // While an entry is replaced, a reader may see a miss, which the
+                    // caller treats as "run the command". It must never see a partial
+                    // restore: a hit always yields the complete set of files.
                     let _ = fs::remove_dir_all(&dest);
-                    assert!(backend.get_dir("live", &root, Path::new(&rel)).unwrap());
-                    assert_eq!(fs::read_dir(&dest).unwrap().count(), 50);
+                    if backend.get_dir("live", &root, Path::new(&rel)).unwrap() {
+                        assert_eq!(fs::read_dir(&dest).unwrap().count(), 50);
+                    }
                 }
             })
         })

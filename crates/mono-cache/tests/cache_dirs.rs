@@ -196,3 +196,58 @@ fn restore_never_writes_through_a_symlinked_ancestor() {
     assert!(!fs::symlink_metadata(dest.join("pkg")).unwrap().file_type().is_symlink());
     assert_eq!(fs::read_to_string(dest.join("pkg/item")).unwrap(), "from snapshot");
 }
+
+#[test]
+fn republishing_a_cache_dir_replaces_the_snapshot() {
+    // A cache directory's key covers only inputs, so the same key can hold newer
+    // content. A later put must replace the snapshot, not keep the first one.
+    let project = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let target = project.path().join("target");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("state"), "v1").unwrap();
+    let backend = LocalBackend::new(store.path().to_path_buf());
+    backend.put_dir("kr", project.path(), Path::new("target")).unwrap();
+
+    fs::write(target.join("state"), "v2").unwrap();
+    fs::write(target.join("new"), "added").unwrap();
+    backend.put_dir("kr", project.path(), Path::new("target")).unwrap();
+
+    fs::remove_dir_all(&target).unwrap();
+    assert!(backend.get_dir("kr", project.path(), Path::new("target")).unwrap());
+    assert_eq!(fs::read_to_string(target.join("state")).unwrap(), "v2");
+    assert!(target.join("new").exists());
+}
+
+#[test]
+fn concurrent_restores_replace_a_directory_placeholder_with_a_file() {
+    // The snapshot has a file `x`. The destination has a directory `x` with content,
+    // and every thread replaces it at the same time.
+    use std::sync::{Arc, Barrier};
+    let project = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    fs::create_dir_all(project.path().join("tree")).unwrap();
+    fs::write(project.path().join("tree/x"), "file").unwrap();
+    let backend = Arc::new(LocalBackend::new(store.path().to_path_buf()));
+    backend.put_dir("kf", project.path(), Path::new("tree")).unwrap();
+
+    let root = project.path().to_path_buf();
+    fs::create_dir_all(root.join("dest/x")).unwrap();
+    fs::write(root.join("dest/x/inner"), "placeholder").unwrap();
+    let barrier = Arc::new(Barrier::new(8));
+    let handles: Vec<_> = (0..8)
+        .map(|_| {
+            let (backend, root, barrier) = (backend.clone(), root.clone(), barrier.clone());
+            std::thread::spawn(move || {
+                barrier.wait();
+                for _ in 0..10 {
+                    backend.get_dir("kf", &root, Path::new("dest")).unwrap();
+                }
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    assert_eq!(fs::read_to_string(root.join("dest/x")).unwrap(), "file");
+}

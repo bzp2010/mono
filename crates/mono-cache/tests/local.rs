@@ -60,3 +60,20 @@ fn failed_put_dir_leaves_no_entry() {
     assert!(backend.put_dir("k3", project.path(), Path::new("target")).is_err());
     assert!(!backend.contains("k3").unwrap());
 }
+
+#[test]
+fn an_empty_directory_is_not_an_entry() {
+    // A crash or a manual edit can leave a directory without the completion marker.
+    // It must not count as an entry, and a publish must replace it.
+    let project = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    fs::write(project.path().join("a.txt"), "x").unwrap();
+    fs::create_dir_all(store.path().join("ke")).unwrap();
+    let backend = LocalBackend::new(store.path().to_path_buf());
+    assert!(!backend.contains("ke").unwrap());
+    assert!(!backend.get("ke", project.path()).unwrap());
+
+    backend.put("ke", project.path(), &[PathBuf::from("a.txt")]).unwrap();
+    assert!(backend.contains("ke").unwrap());
+    assert_eq!(backend.stored_files("ke").unwrap(), vec![PathBuf::from("a.txt")]);
+}

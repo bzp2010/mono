@@ -116,3 +116,14 @@ fn glob_that_expands_outside_the_root_is_rejected() {
     let result = mono_cache::expand_files(&root, &[".[.]/shared/*.txt".to_string()]);
     assert!(result.is_err());
 }
+
+#[test]
+fn a_fifo_matched_by_an_output_pattern_is_an_error() {
+    // Silently skipping a special file would cache an incomplete output set.
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("dist")).unwrap();
+    fs::write(dir.path().join("dist/a"), "x").unwrap();
+    let status = std::process::Command::new("mkfifo").arg(dir.path().join("dist/pipe")).status().unwrap();
+    assert!(status.success());
+    assert!(mono_cache::expand_files(dir.path(), &["dist/*".to_string()]).is_err());
+}
