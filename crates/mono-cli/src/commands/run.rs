@@ -23,7 +23,7 @@ pub fn run(target: &str, base: Option<&str>) -> Result<i32, CliError> {
     let mut tasks = plan(&workspace.graph, target)?;
     if let Some(base) = base {
         let changed = mono_vcs_git::changed_files(&root, base)?;
-        let affected = affected(&workspace.graph, &changed);
+        let affected = affected(&workspace.graph, &root, &changed);
         // The affected tasks and every task they depend on. A dependency's output is
         // an input of the affected task, and its cache key is part of that key. An
         // unaffected dependency normally hits the cache and costs nothing.

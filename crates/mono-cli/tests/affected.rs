@@ -143,3 +143,22 @@ fn affected_runs_the_upstream_tasks_that_its_outputs_depend_on() {
         .stdout(contains("b:build"));
     assert_eq!(fs::read_to_string(root.join("packages/b/dist/out")).unwrap().trim(), "a");
 }
+
+#[test]
+fn a_root_lockfile_change_runs_every_project_of_its_ecosystem() {
+    // The pnpm lockfile at the root is an input of every pnpm package, so all three
+    // run even though none of their own files changed.
+    let dir = workspace();
+    let root = dir.path();
+    fs::write(root.join("pnpm-lock.yaml"), "lockfileVersion: 1\n").unwrap();
+
+    Mono::cargo_bin("mono")
+        .unwrap()
+        .current_dir(root)
+        .args(["run", "build", "--affected"])
+        .assert()
+        .success()
+        .stdout(contains("a:build: ok"))
+        .stdout(contains("b:build: ok"))
+        .stdout(contains("c:build: ok"));
+}
