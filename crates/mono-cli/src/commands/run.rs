@@ -3,7 +3,7 @@
 use std::env;
 
 use mono_cache::LocalBackend;
-use mono_graph::plan;
+use mono_graph::{affected, plan};
 use mono_task::{run_plan, TaskOutcome};
 
 use crate::context::{find_workspace_root, load_workspace, CliError};
@@ -12,11 +12,18 @@ use crate::context::{find_workspace_root, load_workspace, CliError};
 const CACHE_DIR: &str = ".mono/cache";
 
 /// Runs `target` and returns the process exit code: 0 on success, 1 if a task failed.
-pub fn run(target: &str) -> Result<i32, CliError> {
+///
+/// With `base`, only the projects affected by changes since that revision run.
+pub fn run(target: &str, base: Option<&str>) -> Result<i32, CliError> {
     let cwd = env::current_dir()?;
     let root = find_workspace_root(&cwd)?;
     let workspace = load_workspace(&root)?;
-    let tasks = plan(&workspace.graph, target)?;
+    let mut tasks = plan(&workspace.graph, target)?;
+    if let Some(base) = base {
+        let changed = mono_vcs_git::changed_files(&root, base)?;
+        let affected = affected(&workspace.graph, &changed);
+        tasks.retain(|task| affected.contains(&task.project));
+    }
     let cache = LocalBackend::new(root.join(CACHE_DIR));
     let results = run_plan(&workspace.graph, &tasks, Some(&cache))?;
 

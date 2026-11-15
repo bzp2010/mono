@@ -22,6 +22,8 @@ pub enum CliError {
     Graph(#[from] GraphError),
     #[error(transparent)]
     Run(#[from] RunError),
+    #[error(transparent)]
+    Vcs(#[from] mono_vcs_git::VcsError),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
