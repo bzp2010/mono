@@ -74,3 +74,14 @@ fn trailing_double_star_matches_files_beneath_directory() {
         ]
     );
 }
+
+#[test]
+fn glob_metacharacters_in_project_root_do_not_hide_inputs() {
+    // A root such as `repo[1]` must be matched literally, not as a character class.
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("repo[1]");
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("src/a.txt"), "x").unwrap();
+    let files = mono_cache::expand_files(&root, &["src/*.txt".to_string()]).unwrap();
+    assert_eq!(files, vec![std::path::PathBuf::from("src/a.txt")]);
+}

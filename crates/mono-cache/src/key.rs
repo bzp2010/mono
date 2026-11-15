@@ -21,7 +21,9 @@ pub fn expand_files(root: &Path, patterns: &[String]) -> Result<Vec<PathBuf>, Ca
             Some(prefix) => format!("{prefix}/**/*"),
             None => pattern.clone(),
         };
-        let full = root.join(normalized);
+        // The root is escaped so that metacharacters in its path match literally.
+        let escaped_root = glob::Pattern::escape(&root.to_string_lossy());
+        let full = std::path::PathBuf::from(escaped_root).join(normalized);
         let entries = glob::glob(&full.to_string_lossy()).map_err(|e| CacheError::Glob {
             pattern: pattern.clone(),
             message: e.to_string(),
