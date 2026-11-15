@@ -17,9 +17,7 @@ use crate::ProjectGraph;
 pub fn affected(graph: &ProjectGraph, changed: &[PathBuf]) -> BTreeSet<String> {
     let mut direct: BTreeSet<String> = BTreeSet::new();
     for file in changed {
-        if let Some(owner) = owner_of(graph, file) {
-            direct.insert(owner);
-        }
+        direct.extend(owners_of(graph, file));
     }
 
     // Reverse edges: from a project to the projects that depend on it.
@@ -42,11 +40,17 @@ pub fn affected(graph: &ProjectGraph, changed: &[PathBuf]) -> BTreeSet<String> {
     affected
 }
 
-/// The project that owns `file`: the one whose root is the most specific ancestor.
-fn owner_of(graph: &ProjectGraph, file: &Path) -> Option<String> {
-    graph
-        .projects()
-        .filter(|p| file.starts_with(&p.root))
-        .max_by_key(|p| p.root.components().count())
+/// The projects that own `file`: every project whose root is the most specific
+/// ancestor of it. Projects that share that root all own the file.
+fn owners_of(graph: &ProjectGraph, file: &Path) -> Vec<String> {
+    let containing: Vec<&crate::Project> =
+        graph.projects().filter(|p| file.starts_with(&p.root)).collect();
+    let Some(depth) = containing.iter().map(|p| p.root.components().count()).max() else {
+        return Vec::new();
+    };
+    containing
+        .into_iter()
+        .filter(|p| p.root.components().count() == depth)
         .map(|p| p.name.clone())
+        .collect()
 }

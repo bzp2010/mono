@@ -69,3 +69,18 @@ fn several_changes_are_unioned() {
     let changed = [PathBuf::from("/ws/other/a"), PathBuf::from("/ws/core/b")];
     assert_eq!(affected(&g, &changed), set(&["core", "lib", "app", "other"]));
 }
+
+#[test]
+fn every_project_sharing_the_owning_root_is_affected() {
+    // A root can hold two projects, such as a Cargo workspace and a pnpm package. A
+    // change under that root belongs to both, so both must be affected.
+    let g = build(
+        vec![proj("cargo-root", "/ws/root", &[]), proj("pnpm-root", "/ws/root", &[])],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        affected(&g, &[PathBuf::from("/ws/root/src/lib.rs")]),
+        set(&["cargo-root", "pnpm-root"])
+    );
+}
