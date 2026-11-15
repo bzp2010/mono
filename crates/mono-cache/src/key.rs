@@ -58,6 +58,11 @@ pub fn task_key(
     let mut h = Sha256::new();
     feed(&mut h, "task", task.to_string().as_bytes());
     feed(&mut h, "command", target.command.as_bytes());
+    // Output declarations are part of the key: a snapshot taken under other
+    // declarations must not be restored.
+    for pattern in &target.outputs {
+        feed(&mut h, "output-declaration", pattern.as_bytes());
+    }
     for rel in expand_files(project_root, &target.inputs)? {
         let content = read(&project_root.join(&rel))?;
         feed(&mut h, "input-path", rel.to_string_lossy().as_bytes());

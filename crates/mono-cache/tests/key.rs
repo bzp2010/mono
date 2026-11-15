@@ -85,3 +85,14 @@ fn glob_metacharacters_in_project_root_do_not_hide_inputs() {
     let files = mono_cache::expand_files(&root, &["src/*.txt".to_string()]).unwrap();
     assert_eq!(files, vec![std::path::PathBuf::from("src/a.txt")]);
 }
+
+#[test]
+fn changing_declared_outputs_changes_key() {
+    // Restoring a snapshot taken under other output declarations would be wrong.
+    let dir = tempfile::tempdir().unwrap();
+    let mut t = target(&[]);
+    t.outputs = vec!["dist/a".into()];
+    let before = key(dir.path(), &t);
+    t.outputs = vec!["dist/b".into()];
+    assert_ne!(before, key(dir.path(), &t));
+}
