@@ -20,6 +20,30 @@ impl LocalBackend {
     fn entry_dir(&self, key: &str) -> PathBuf {
         self.dir.join(key)
     }
+
+    /// Builds an entry in a private staging directory, then renames it into
+    /// place. A reader sees either no entry or a complete one, never a partial
+    /// write, and a failed build leaves nothing behind.
+    fn publish(
+        &self,
+        key: &str,
+        build: impl FnOnce(&Path) -> Result<(), CacheError>,
+    ) -> Result<(), CacheError> {
+        fs::create_dir_all(&self.dir)
+            .map_err(|source| CacheError::Io { path: self.dir.clone(), source })?;
+        let staging = tempfile::TempDir::new_in(&self.dir)
+            .map_err(|source| CacheError::Io { path: self.dir.clone(), source })?;
+        build(staging.path())?;
+        let dst = self.entry_dir(key);
+        if dst.exists() {
+            fs::remove_dir_all(&dst).map_err(|source| CacheError::Io { path: dst.clone(), source })?;
+        }
+        let staged = staging.keep();
+        fs::rename(&staged, &dst).map_err(|source| {
+            let _ = fs::remove_dir_all(&staged);
+            CacheError::Io { path: dst.clone(), source }
+        })
+    }
 }
 
 impl CacheBackend for LocalBackend {
@@ -55,24 +79,16 @@ impl CacheBackend for LocalBackend {
         if !src_dir.is_dir() {
             return Ok(());
         }
-        let dst = self.entry_dir(key);
-        if dst.exists() {
-            fs::remove_dir_all(&dst)
-                .map_err(|source| CacheError::Io { path: dst.clone(), source })?;
-        }
-        Self::copy_tree(src_dir, &dst)
+        self.publish(key, |stage| Self::copy_tree(src_dir, stage))
     }
 
     fn put(&self, key: &str, project_root: &Path, rel_paths: &[PathBuf]) -> Result<(), CacheError> {
-        let dst = self.entry_dir(key);
-        if dst.exists() {
-            fs::remove_dir_all(&dst)
-                .map_err(|source| CacheError::Io { path: dst.clone(), source })?;
-        }
-        for rel in rel_paths {
-            copy(&project_root.join(rel), &dst.join(rel))?;
-        }
-        Ok(())
+        self.publish(key, |stage| {
+            for rel in rel_paths {
+                copy(&project_root.join(rel), &stage.join(rel))?;
+            }
+            Ok(())
+        })
     }
 }
 
