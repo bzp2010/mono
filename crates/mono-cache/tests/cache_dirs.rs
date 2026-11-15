@@ -79,3 +79,52 @@ fn symlinks_round_trip_without_being_followed() {
     assert_eq!(fs::read_link(&link).unwrap(), std::path::PathBuf::from("../typescript/bin/tsc"));
     assert_eq!(fs::read_to_string(&link).unwrap(), "compiler");
 }
+
+#[test]
+fn restored_files_keep_their_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+    let project = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let bin = project.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    fs::write(bin.join("tool"), "#!/bin/sh\n").unwrap();
+    fs::set_permissions(bin.join("tool"), fs::Permissions::from_mode(0o755)).unwrap();
+
+    let backend = LocalBackend::new(store.path().to_path_buf());
+    backend.put_dir("k5", &bin).unwrap();
+    fs::remove_dir_all(&bin).unwrap();
+    assert!(backend.get_dir("k5", &bin).unwrap());
+
+    let mode = fs::metadata(bin.join("tool")).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o755);
+}
+
+#[test]
+fn concurrent_restores_of_one_entry_all_succeed() {
+    let project = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let dir = project.path().join("out");
+    fs::create_dir_all(&dir).unwrap();
+    for i in 0..50 {
+        fs::write(dir.join(format!("f{i}.bin")), vec![i as u8; 4096]).unwrap();
+    }
+    let backend = std::sync::Arc::new(LocalBackend::new(store.path().to_path_buf()));
+    backend.put_dir("k6", &dir).unwrap();
+
+    let dest = project.path().join("restored");
+    let handles: Vec<_> = (0..8)
+        .map(|_| {
+            let backend = backend.clone();
+            let dest = dest.clone();
+            std::thread::spawn(move || {
+                for _ in 0..20 {
+                    backend.get_dir("k6", &dest).unwrap();
+                }
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    assert_eq!(fs::read(dest.join("f7.bin")).unwrap(), vec![7u8; 4096]);
+}

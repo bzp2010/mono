@@ -119,19 +119,29 @@ impl LocalBackend {
     }
 }
 
-/// Copies `from` to `to` through a temporary sibling that is renamed into
-/// place. Writing in place fails with ETXTBSY when `to` is a running binary;
-/// rename replaces the directory entry and leaves the running inode alone.
+/// Copies `from` to `to` through a uniquely named temporary file in the same
+/// directory, renamed into place. Each copy owns its temporary file, so
+/// concurrent restores of one destination cannot interfere. Writing in place
+/// would also fail with ETXTBSY when `to` is a running binary.
 fn copy(from: &Path, to: &Path) -> Result<(), CacheError> {
-    if let Some(parent) = to.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|source| CacheError::Io { path: parent.to_path_buf(), source })?;
-    }
-    let name = to.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
-    let tmp = to.with_file_name(format!(".{name}.mono-tmp"));
-    fs::copy(from, &tmp)
+    let parent = to.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(parent)
+        .map_err(|source| CacheError::Io { path: parent.to_path_buf(), source })?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|source| CacheError::Io { path: parent.to_path_buf(), source })?;
+    let mut src = fs::File::open(from)
         .map_err(|source| CacheError::Io { path: from.to_path_buf(), source })?;
-    fs::rename(&tmp, to).map_err(|source| CacheError::Io { path: to.to_path_buf(), source })
+    std::io::copy(&mut src, tmp.as_file_mut())
+        .map_err(|source| CacheError::Io { path: from.to_path_buf(), source })?;
+    let mode = src
+        .metadata()
+        .map_err(|source| CacheError::Io { path: from.to_path_buf(), source })?
+        .permissions();
+    fs::set_permissions(tmp.path(), mode)
+        .map_err(|source| CacheError::Io { path: tmp.path().to_path_buf(), source })?;
+    tmp.persist(to)
+        .map_err(|e| CacheError::Io { path: to.to_path_buf(), source: e.error })?;
+    Ok(())
 }
 
 /// Creates a symbolic link at `dst`, replacing whatever was there, through a
