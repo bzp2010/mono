@@ -92,10 +92,15 @@ pub fn discover_pnpm(root: &Path) -> Result<Vec<DiscoveredProject>, DiscoverErro
 }
 
 /// The package a `workspace:` spec refers to. `workspace:*` and `workspace:^1.0.0`
-/// refer to the dependency's own name. `workspace:foo@*` is an alias, so it
-/// refers to `foo`, and a scoped name such as `@scope/foo@*` keeps its scope.
+/// refer to the dependency's own name, and so do path references such as
+/// `workspace:../foo`. `workspace:foo@*` is an alias, so it refers to `foo`, and
+/// a scoped name such as `@scope/foo@*` keeps its scope.
 fn workspace_target(dep: &str, spec: &str) -> Option<String> {
     let rest = spec.strip_prefix("workspace:")?;
+    // A path reference names the package by the dependency key, not by the path.
+    if rest.starts_with('.') || rest.starts_with('/') {
+        return Some(dep.to_string());
+    }
     match rest.rfind('@') {
         Some(i) if i > 0 => Some(rest[..i].to_string()),
         _ => Some(dep.to_string()),

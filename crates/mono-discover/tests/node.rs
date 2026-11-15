@@ -98,3 +98,28 @@ fn pnpm_workspace_alias_resolves_to_the_target_package() {
     let projects = discover(&root, &[Ecosystem::Pnpm]).unwrap();
     assert_eq!(find(&projects, "root").dependencies, vec!["foo".to_string()]);
 }
+
+#[test]
+fn pnpm_path_workspace_spec_keeps_the_scoped_package_name() {
+    // A path reference is a `workspace:` spec too. Its `@` belongs to a scope,
+    // so the edge must still point at `@scope/foo`.
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("ws");
+    let app = root.join("packages/app");
+    let foo = root.join("packages/@scope/foo");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::create_dir_all(&foo).unwrap();
+    std::fs::write(
+        root.join("pnpm-workspace.yaml"),
+        "packages:\n  - \"packages/app\"\n  - \"packages/@scope/foo\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("package.json"),
+        r#"{"name":"app","version":"1.0.0","dependencies":{"@scope/foo":"workspace:../@scope/foo"}}"#,
+    )
+    .unwrap();
+    std::fs::write(foo.join("package.json"), r#"{"name":"@scope/foo","version":"1.0.0"}"#).unwrap();
+    let projects = discover(&root, &[Ecosystem::Pnpm]).unwrap();
+    assert_eq!(find(&projects, "app").dependencies, vec!["@scope/foo".to_string()]);
+}
