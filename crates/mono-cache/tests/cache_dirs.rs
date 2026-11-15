@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::fs;
 
 use mono_cache::{CacheBackend, LocalBackend};
@@ -11,10 +12,10 @@ fn directory_round_trips_as_a_whole() {
     fs::write(target_dir.join("debug/deps/libx.rlib"), "bits").unwrap();
 
     let backend = LocalBackend::new(store.path().to_path_buf());
-    backend.put_dir("k", &target_dir).unwrap();
+    backend.put_dir("k", project.path(), Path::new("target")).unwrap();
     fs::remove_dir_all(&target_dir).unwrap();
 
-    assert!(backend.get_dir("k", &target_dir).unwrap());
+    assert!(backend.get_dir("k", project.path(), Path::new("target")).unwrap());
     assert_eq!(fs::read_to_string(target_dir.join("debug/deps/libx.rlib")).unwrap(), "bits");
 }
 
@@ -23,8 +24,8 @@ fn missing_source_directory_is_not_an_error() {
     let project = tempfile::tempdir().unwrap();
     let store = tempfile::tempdir().unwrap();
     let backend = LocalBackend::new(store.path().to_path_buf());
-    backend.put_dir("k", &project.path().join("absent")).unwrap();
-    assert!(!backend.get_dir("k", &project.path().join("absent")).unwrap());
+    backend.put_dir("k", project.path(), Path::new("absent")).unwrap();
+    assert!(!backend.get_dir("k", project.path(), Path::new("absent")).unwrap());
 }
 
 #[test]
@@ -32,7 +33,7 @@ fn get_dir_misses_for_unknown_key() {
     let project = tempfile::tempdir().unwrap();
     let store = tempfile::tempdir().unwrap();
     let backend = LocalBackend::new(store.path().to_path_buf());
-    assert!(!backend.get_dir("never", &project.path().join("target")).unwrap());
+    assert!(!backend.get_dir("never", project.path(), Path::new("target")).unwrap());
 }
 
 #[test]
@@ -46,13 +47,13 @@ fn restore_succeeds_over_a_running_executable() {
     fs::copy("/bin/sleep", target_dir.join("bin/prog")).unwrap();
 
     let backend = LocalBackend::new(store.path().to_path_buf());
-    backend.put_dir("k", &target_dir).unwrap();
+    backend.put_dir("k", project.path(), Path::new("target")).unwrap();
 
     let mut running = std::process::Command::new(target_dir.join("bin/prog"))
         .arg("5")
         .spawn()
         .unwrap();
-    let restored = backend.get_dir("k", &target_dir);
+    let restored = backend.get_dir("k", project.path(), Path::new("target"));
     let _ = running.kill();
     let _ = running.wait();
 
@@ -70,9 +71,9 @@ fn symlinks_round_trip_without_being_followed() {
     std::os::unix::fs::symlink("../typescript/bin/tsc", modules.join(".bin/tsc")).unwrap();
 
     let backend = LocalBackend::new(store.path().to_path_buf());
-    backend.put_dir("k4", &modules).unwrap();
+    backend.put_dir("k4", project.path(), Path::new("node_modules")).unwrap();
     fs::remove_dir_all(&modules).unwrap();
-    assert!(backend.get_dir("k4", &modules).unwrap());
+    assert!(backend.get_dir("k4", project.path(), Path::new("node_modules")).unwrap());
 
     let link = modules.join(".bin/tsc");
     assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
@@ -91,9 +92,9 @@ fn restored_files_keep_their_permissions() {
     fs::set_permissions(bin.join("tool"), fs::Permissions::from_mode(0o755)).unwrap();
 
     let backend = LocalBackend::new(store.path().to_path_buf());
-    backend.put_dir("k5", &bin).unwrap();
+    backend.put_dir("k5", project.path(), Path::new("bin")).unwrap();
     fs::remove_dir_all(&bin).unwrap();
-    assert!(backend.get_dir("k5", &bin).unwrap());
+    assert!(backend.get_dir("k5", project.path(), Path::new("bin")).unwrap());
 
     let mode = fs::metadata(bin.join("tool")).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o755);
@@ -109,16 +110,16 @@ fn concurrent_restores_of_one_entry_all_succeed() {
         fs::write(dir.join(format!("f{i}.bin")), vec![i as u8; 4096]).unwrap();
     }
     let backend = std::sync::Arc::new(LocalBackend::new(store.path().to_path_buf()));
-    backend.put_dir("k6", &dir).unwrap();
+    backend.put_dir("k6", project.path(), Path::new("out")).unwrap();
 
     let dest = project.path().join("restored");
     let handles: Vec<_> = (0..8)
         .map(|_| {
             let backend = backend.clone();
-            let dest = dest.clone();
+            let root = project.path().to_path_buf();
             std::thread::spawn(move || {
                 for _ in 0..20 {
-                    backend.get_dir("k6", &dest).unwrap();
+                    backend.get_dir("k6", &root, Path::new("restored")).unwrap();
                 }
             })
         })
@@ -139,14 +140,14 @@ fn restore_replaces_a_directory_where_the_snapshot_has_a_link() {
     std::os::unix::fs::symlink("typescript", modules.join("pkg")).unwrap();
 
     let backend = LocalBackend::new(store.path().to_path_buf());
-    backend.put_dir("k7", &modules).unwrap();
+    backend.put_dir("k7", project.path(), Path::new("node_modules")).unwrap();
 
     // The destination now has a real directory at the place of the link.
     fs::remove_file(modules.join("pkg")).unwrap();
     fs::create_dir_all(modules.join("pkg")).unwrap();
     fs::write(modules.join("pkg/stale"), "x").unwrap();
 
-    assert!(backend.get_dir("k7", &modules).unwrap());
+    assert!(backend.get_dir("k7", project.path(), Path::new("node_modules")).unwrap());
     assert!(fs::symlink_metadata(modules.join("pkg")).unwrap().file_type().is_symlink());
 }
 
@@ -159,13 +160,13 @@ fn restore_replaces_a_directory_where_the_snapshot_has_a_file() {
     fs::write(tree.join("item"), "file").unwrap();
 
     let backend = LocalBackend::new(store.path().to_path_buf());
-    backend.put_dir("k8", &tree).unwrap();
+    backend.put_dir("k8", project.path(), Path::new("tree")).unwrap();
 
     fs::remove_file(tree.join("item")).unwrap();
     fs::create_dir_all(tree.join("item")).unwrap();
     fs::write(tree.join("item/inner"), "x").unwrap();
 
-    assert!(backend.get_dir("k8", &tree).unwrap());
+    assert!(backend.get_dir("k8", project.path(), Path::new("tree")).unwrap());
     assert_eq!(fs::read_to_string(tree.join("item")).unwrap(), "file");
 }
 
@@ -180,7 +181,7 @@ fn restore_never_writes_through_a_symlinked_ancestor() {
     fs::create_dir_all(source.join("pkg")).unwrap();
     fs::write(source.join("pkg/item"), "from snapshot").unwrap();
     let backend = LocalBackend::new(store.path().to_path_buf());
-    backend.put_dir("k9", &source).unwrap();
+    backend.put_dir("k9", base.path(), Path::new("source")).unwrap();
 
     let external = base.path().join("external");
     fs::create_dir_all(external.join("item")).unwrap();
@@ -189,7 +190,7 @@ fn restore_never_writes_through_a_symlinked_ancestor() {
     fs::create_dir_all(&dest).unwrap();
     std::os::unix::fs::symlink(&external, dest.join("pkg")).unwrap();
 
-    assert!(backend.get_dir("k9", &dest).unwrap());
+    assert!(backend.get_dir("k9", base.path(), Path::new("dest")).unwrap());
 
     assert_eq!(fs::read_to_string(external.join("item/keep.txt")).unwrap(), "outside");
     assert!(!fs::symlink_metadata(dest.join("pkg")).unwrap().file_type().is_symlink());

@@ -1,13 +1,18 @@
 //! Cache keys and pluggable cache backends.
+//!
+//! Every path inside a project is handled through a confined tree, so a
+//! pattern, a cache entry, or a link cannot read, write, or remove anything
+//! outside the project directory.
 
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+mod confine;
 mod key;
 mod local;
 
-pub use key::{check_relative, dir_key, expand_files, output_digest, task_key};
+pub use key::{dir_key, expand_files, output_digest, remove_matching, task_key};
 pub use local::LocalBackend;
 
 /// Errors raised by cache keys and backends.
@@ -19,23 +24,27 @@ pub enum CacheError {
         #[source]
         source: std::io::Error,
     },
-    #[error("pattern {pattern} must be relative to the project root and must not contain ..")]
-    OutsideProject { pattern: String },
     #[error("invalid glob {pattern}: {message}")]
     Glob { pattern: String, message: String },
+    #[error("{pattern} must be relative to the project root, without .., and must resolve inside it")]
+    OutsideProject { pattern: String },
+    #[error("{path} is a symbolic link, and mono does not write or remove through links")]
+    ThroughLink { path: PathBuf },
 }
 
-/// Storage for task outputs, addressed by cache key.
+/// Storage for task outputs, addressed by cache key. Every relative path is
+/// interpreted inside `project_root`.
 pub trait CacheBackend {
     /// Whether a complete entry exists for `key`.
     fn contains(&self, key: &str) -> Result<bool, CacheError>;
     /// Restores the entry for `key` into `project_root`. Returns `false` on a miss.
     fn get(&self, key: &str, project_root: &Path) -> Result<bool, CacheError>;
-    /// Stores the files at `rel_paths` (relative to `project_root`) under `key`.
+    /// Stores the files at `rel_paths` under `key`.
     fn put(&self, key: &str, project_root: &Path, rel_paths: &[PathBuf]) -> Result<(), CacheError>;
-    /// Restores a whole directory tree stored under `key` into `dest_dir`.
+    /// Restores the tree stored under `key` into `rel_dir` of `project_root`.
     /// Returns `false` on a miss.
-    fn get_dir(&self, key: &str, dest_dir: &Path) -> Result<bool, CacheError>;
-    /// Stores a whole directory tree under `key`. A missing source is a no-op.
-    fn put_dir(&self, key: &str, src_dir: &Path) -> Result<(), CacheError>;
+    fn get_dir(&self, key: &str, project_root: &Path, rel_dir: &Path) -> Result<bool, CacheError>;
+    /// Stores the tree at `rel_dir` of `project_root` under `key`. A missing
+    /// directory is a no-op.
+    fn put_dir(&self, key: &str, project_root: &Path, rel_dir: &Path) -> Result<(), CacheError>;
 }

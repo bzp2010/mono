@@ -1,76 +1,43 @@
 //! Cache keys and digests over declared inputs and outputs.
 
-use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use mono_core::TargetConfig;
 use mono_graph::TaskId;
 use sha2::{Digest, Sha256};
 
+use crate::confine::Tree;
 use crate::CacheError;
 
-/// Expands glob patterns relative to `root` into sorted, unique file paths
-/// that are relative to `root`. Directories are skipped. A pattern that
-/// matches nothing contributes nothing.
+/// Expands glob patterns relative to `root` into sorted file paths. See
+/// [`Tree::expand`] for the rules.
 pub fn expand_files(root: &Path, patterns: &[String]) -> Result<Vec<PathBuf>, CacheError> {
-    let mut out = Vec::new();
-    for pattern in patterns {
-        check_relative(pattern)?;
-        // The glob crate matches only directories for a trailing `**`, so
-        // `dist/**` is rewritten to `dist/**/*` to mean every file beneath it.
-        let normalized = match pattern.strip_suffix("/**") {
-            Some(prefix) => format!("{prefix}/**/*"),
-            None => pattern.clone(),
-        };
-        // The root is escaped so that metacharacters in its path match literally.
-        let escaped_root = glob::Pattern::escape(&root.to_string_lossy());
-        let full = std::path::PathBuf::from(escaped_root).join(normalized);
-        let entries = glob::glob(&full.to_string_lossy()).map_err(|e| CacheError::Glob {
-            pattern: pattern.clone(),
-            message: e.to_string(),
-        })?;
-        for entry in entries {
-            let path = entry.map_err(|e| CacheError::Io {
-                path: e.path().to_path_buf(),
-                source: e.into(),
-            })?;
-            if path.is_file() {
-                let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
-                // Patterns such as `.[.]` match `..` without containing it literally,
-                // so each expanded path is checked as well.
-                check_relative(&rel.to_string_lossy())?;
-                out.push(rel);
-            }
-        }
-    }
-    out.sort();
-    out.dedup();
-    Ok(out)
+    Tree::new(root).expand(patterns)
 }
 
-/// Rejects patterns that could reach outside the project root: absolute paths
-/// and any `..` component. Such outputs would be removed or copied elsewhere.
-pub fn check_relative(pattern: &str) -> Result<(), CacheError> {
-    let escapes = Path::new(pattern)
-        .components()
-        .any(|c| matches!(c, Component::ParentDir | Component::RootDir | Component::Prefix(_)));
-    if escapes {
-        return Err(CacheError::OutsideProject { pattern: pattern.to_string() });
+/// Removes every file that the patterns match under `root`, as the outputs of
+/// an earlier version. Missing files are skipped.
+pub fn remove_matching(root: &Path, patterns: &[String]) -> Result<(), CacheError> {
+    let tree = Tree::new(root);
+    for rel in tree.expand(patterns)? {
+        tree.remove_file(&rel)?;
     }
     Ok(())
 }
 
 /// Computes the cache key of a task.
 ///
-/// The key covers the task identity, the command, the content of every input
-/// file, and the contributions of the task's dependencies. A dependency's
-/// contribution is its output digest when it declares outputs, otherwise its key.
+/// The key covers the task identity, the command, the declared output patterns,
+/// the content of every input file, and the dependency contributions. A
+/// dependency's contribution is its output digest when it declares outputs,
+/// otherwise its key.
 pub fn task_key(
     task: &TaskId,
     target: &TargetConfig,
     project_root: &Path,
     dep_contributions: &[String],
 ) -> Result<String, CacheError> {
+    let tree = Tree::new(project_root);
     let mut h = Sha256::new();
     feed(&mut h, "task", task.to_string().as_bytes());
     feed(&mut h, "command", target.command.as_bytes());
@@ -79,8 +46,8 @@ pub fn task_key(
     for pattern in &target.outputs {
         feed(&mut h, "output-declaration", pattern.as_bytes());
     }
-    for rel in expand_files(project_root, &target.inputs)? {
-        let content = read(&project_root.join(&rel))?;
+    for rel in tree.expand(&target.inputs)? {
+        let content = tree.read(&rel)?;
         feed(&mut h, "input-path", rel.to_string_lossy().as_bytes());
         feed(&mut h, "input-content", &Sha256::digest(&content));
     }
@@ -101,9 +68,10 @@ pub fn dir_key(target_key: &str, dir: &str) -> String {
 
 /// Digest over the paths and contents of output files, in sorted path order.
 pub fn output_digest(project_root: &Path, rel_paths: &[PathBuf]) -> Result<String, CacheError> {
+    let tree = Tree::new(project_root);
     let mut h = Sha256::new();
     for rel in rel_paths {
-        let content = read(&project_root.join(rel))?;
+        let content = tree.read(rel)?;
         feed(&mut h, "output-path", rel.to_string_lossy().as_bytes());
         feed(&mut h, "output-content", &Sha256::digest(&content));
     }
@@ -116,10 +84,6 @@ fn feed(h: &mut Sha256, label: &str, bytes: &[u8]) {
     h.update(label.as_bytes());
     h.update((bytes.len() as u64).to_le_bytes());
     h.update(bytes);
-}
-
-fn read(path: &Path) -> Result<Vec<u8>, CacheError> {
-    fs::read(path).map_err(|source| CacheError::Io { path: path.to_path_buf(), source })
 }
 
 fn hex(bytes: &[u8]) -> String {

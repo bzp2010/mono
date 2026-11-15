@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::fs;
 use std::path::PathBuf;
 
@@ -56,15 +57,14 @@ fn failed_put_dir_leaves_no_entry() {
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
 
     let backend = LocalBackend::new(store.path().to_path_buf());
-    let result = backend.put_dir("k3", &target);
+    let result = backend.put_dir("k3", project.path(), Path::new("target"));
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
 
     if running_as_root() {
         return; // root can read mode 000 files, so the failure cannot be produced
     }
     assert!(result.is_err());
-    let dest = project.path().join("restored");
-    assert!(!backend.get_dir("k3", &dest).unwrap());
+    assert!(!backend.get_dir("k3", project.path(), Path::new("restored")).unwrap());
 }
 
 fn running_as_root() -> bool {

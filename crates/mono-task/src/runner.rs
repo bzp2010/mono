@@ -1,12 +1,11 @@
 //! Runs target commands in project directories, with optional output caching.
 
 use std::collections::BTreeMap;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use mono_cache::{
-    check_relative, dir_key, expand_files, output_digest, task_key, CacheBackend, CacheError,
+    dir_key, expand_files, output_digest, remove_matching, task_key, CacheBackend, CacheError,
 };
 use mono_graph::{task_dependencies, GraphError, ProjectGraph, TaskId};
 use thiserror::Error;
@@ -39,12 +38,6 @@ pub enum RunError {
     Graph(#[from] GraphError),
     #[error(transparent)]
     Cache(#[from] CacheError),
-    #[error("I/O error at {path}: {source}")]
-    Io {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
 }
 
 /// Runs `command` through `sh -c` with `root` as the working directory.
@@ -91,19 +84,12 @@ pub fn run_plan(
         let key = task_key(task, config, root, &dep_contributions)?;
         let cacheable = cache.is_some() && !config.outputs.is_empty();
 
-        for dir in &config.cache_dirs {
-            check_relative(dir)?;
-        }
         // A hit replaces the outputs with the snapshot, so outputs from another
         // version are removed first. A miss leaves them alone, because the
         // command may be incremental and rely on them.
         let cached = match cache {
             Some(backend) if cacheable && backend.contains(&key)? => {
-                for rel in expand_files(root, &config.outputs)? {
-                    let path = root.join(&rel);
-                    fs::remove_file(&path)
-                        .map_err(|source| RunError::Io { path: path.clone(), source })?;
-                }
+                remove_matching(root, &config.outputs)?;
                 backend.get(&key, root)?
             }
             _ => false,
@@ -115,23 +101,22 @@ pub fn run_plan(
             // before it, so the tool can use its own incremental state.
             if let Some(backend) = cache {
                 for dir in &config.cache_dirs {
-                    backend.get_dir(&dir_key(&key, dir), &root.join(dir))?;
+                    backend.get_dir(&dir_key(&key, dir), root, Path::new(dir))?;
                 }
             }
             let outcome = run_task(task, root, &config.command)?;
             if let (Some(backend), TaskOutcome::Success) = (cache, &outcome) {
                 for dir in &config.cache_dirs {
-                    backend.put_dir(&dir_key(&key, dir), &root.join(dir))?;
+                    backend.put_dir(&dir_key(&key, dir), root, Path::new(dir))?;
                 }
             }
             outcome
         };
 
         let rel = expand_files(root, &config.outputs)?;
-        if cacheable && outcome == TaskOutcome::Success && !rel.is_empty() {
-            if let Some(backend) = cache {
-                backend.put(&key, root, &rel)?;
-            }
+        let publish = cacheable && outcome == TaskOutcome::Success && !rel.is_empty();
+        if let Some(backend) = cache.filter(|_| publish) {
+            backend.put(&key, root, &rel)?;
         }
         let contribution = if config.outputs.is_empty() {
             key
