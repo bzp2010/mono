@@ -30,3 +30,7 @@ mono run build        # run the build target across the graph
 ## Developing mono
 
 `mono` manages this repository itself. The root `project.json` declares `build` and `test` targets, so `mono run build` and `mono run test` work from the root. Running `mono run test` inside an automated test would contend for the Cargo build lock, so the self-host test only checks `mono graph`.
+
+## License
+
+`mono` is free software licensed under the GNU Affero General Public License, version 3 or (at your option) any later version. See [LICENSE](LICENSE).
