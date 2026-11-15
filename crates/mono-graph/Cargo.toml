@@ -1,0 +1,11 @@
+[package]
+name = "mono-graph"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+mono-core = { path = "../mono-core" }
+thiserror = "2"
+
+[dev-dependencies]
+mono-discover = { path = "../mono-discover" }
