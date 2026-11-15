@@ -14,10 +14,11 @@ Turns discovered projects and explicit config into a validated graph, and plans 
 - A bare `name` in `dependsOn` must exist in the same project. A missing one is `MissingTarget`, because a typo there would otherwise vanish silently.
 - A cycle among tasks in one project is `TaskCycle`. The project graph is acyclic by construction, but `dependsOn` edges inside a project are checked here.
 - Projects are visited in topological order, so plans are deterministic.
-- `affected(graph, changed)`: the projects that changed files belong to, and every project that depends on them, directly or through other projects. A file belongs to the projects whose root is its most specific ancestor. Several projects can share a root, and all of them own its files. Files outside every project belong to none.
+- `affected(graph, workspace_root, changed)`: the projects that changed files belong to, the projects of an ecosystem whose workspace input changed, every project if `mono.json` changed, and every project that depends on the affected ones, directly or through other projects. A file belongs to the projects whose root is its most specific ancestor. Several projects can share a root, and all of them own its files. Files outside every project belong to none.
 
 ## Pitfalls
 
 - `affected` takes absolute paths in the same form as project roots. Relative paths match nothing.
-- A change to a file outside every project, such as a root config file, affects nothing. Workspace-wide inputs must be handled by the caller if they should count.
+- Workspace inputs are a fixed table in `affected.rs`. Lockfiles and toolchain files (`Cargo.lock`, `rust-toolchain`, `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, and similar) affect only the projects of their ecosystem. `mono.json` affects every project. A workspace input is recognised only directly under the workspace root, and it belongs to no project, so a Cargo project that shares the root with a pnpm package is not affected by the pnpm lockfile.
+- Other files outside every project, such as a README, affect nothing.
 - Dependencies of an affected project are not affected by it, but they are still planned by `--affected`. The affected task's cache key includes its dependencies' outputs, so the dependencies must be evaluated. An unchanged dependency is a cache hit.
