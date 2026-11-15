@@ -107,6 +107,7 @@ impl LocalBackend {
             })?;
             let rel = entry.path().strip_prefix(from).expect("walked from root");
             let dst = to.join(rel);
+            prepare_parents(to, &dst)?;
             let kind = entry.file_type();
             if kind.is_dir() {
                 fs::create_dir_all(&dst)
@@ -146,6 +147,31 @@ fn copy(from: &Path, to: &Path) -> Result<(), CacheError> {
     clear_conflicting_directory(to)?;
     tmp.persist(to)
         .map_err(|e| CacheError::Io { path: to.to_path_buf(), source: e.error })?;
+    Ok(())
+}
+
+/// Makes every ancestor of `dst` below `root` a real directory. A symlink or a
+/// file in that position is replaced, so nothing is ever written through a link
+/// that points outside the tree. `root` itself is trusted.
+fn prepare_parents(root: &Path, dst: &Path) -> Result<(), CacheError> {
+    let Ok(rel) = dst.strip_prefix(root) else {
+        return Ok(());
+    };
+    let Some(parent) = rel.parent() else {
+        return Ok(());
+    };
+    let mut current = root.to_path_buf();
+    for component in parent.components() {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => fs::remove_file(&current)
+                .map_err(|source| CacheError::Io { path: current.clone(), source })?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => fs::create_dir(&current)
+                .map_err(|source| CacheError::Io { path: current.clone(), source })?,
+            Err(source) => return Err(CacheError::Io { path: current.clone(), source }),
+        }
+    }
     Ok(())
 }
 

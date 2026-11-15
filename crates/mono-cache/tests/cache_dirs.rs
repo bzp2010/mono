@@ -168,3 +168,30 @@ fn restore_replaces_a_directory_where_the_snapshot_has_a_file() {
     assert!(backend.get_dir("k8", &tree).unwrap());
     assert_eq!(fs::read_to_string(tree.join("item")).unwrap(), "file");
 }
+
+#[test]
+fn restore_never_writes_through_a_symlinked_ancestor() {
+    // The destination's `pkg` is a link to a directory outside the tree. The
+    // snapshot wants `pkg` to be a real directory containing a file `item`.
+    // Nothing outside the tree may be touched.
+    let base = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let source = base.path().join("source");
+    fs::create_dir_all(source.join("pkg")).unwrap();
+    fs::write(source.join("pkg/item"), "from snapshot").unwrap();
+    let backend = LocalBackend::new(store.path().to_path_buf());
+    backend.put_dir("k9", &source).unwrap();
+
+    let external = base.path().join("external");
+    fs::create_dir_all(external.join("item")).unwrap();
+    fs::write(external.join("item/keep.txt"), "outside").unwrap();
+    let dest = base.path().join("dest");
+    fs::create_dir_all(&dest).unwrap();
+    std::os::unix::fs::symlink(&external, dest.join("pkg")).unwrap();
+
+    assert!(backend.get_dir("k9", &dest).unwrap());
+
+    assert_eq!(fs::read_to_string(external.join("item/keep.txt")).unwrap(), "outside");
+    assert!(!fs::symlink_metadata(dest.join("pkg")).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read_to_string(dest.join("pkg/item")).unwrap(), "from snapshot");
+}
