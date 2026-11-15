@@ -139,9 +139,20 @@ fn copy(from: &Path, to: &Path) -> Result<(), CacheError> {
         .permissions();
     fs::set_permissions(tmp.path(), mode)
         .map_err(|source| CacheError::Io { path: tmp.path().to_path_buf(), source })?;
+    clear_conflicting_directory(to)?;
     tmp.persist(to)
         .map_err(|e| CacheError::Io { path: to.to_path_buf(), source: e.error })?;
     Ok(())
+}
+
+/// Removes a real directory at `dst` so that a file or link can take its place.
+/// The check uses `symlink_metadata`, so a link to a directory is never followed.
+fn clear_conflicting_directory(dst: &Path) -> Result<(), CacheError> {
+    match fs::symlink_metadata(dst) {
+        Ok(meta) if meta.is_dir() => fs::remove_dir_all(dst)
+            .map_err(|source| CacheError::Io { path: dst.to_path_buf(), source }),
+        _ => Ok(()),
+    }
 }
 
 /// Creates a symbolic link at `dst`, replacing whatever was there, through a
@@ -154,6 +165,7 @@ fn symlink_into_place(target: &Path, dst: &Path) -> Result<(), CacheError> {
         let tmp = parent.join(format!(".mono-link-{}-{attempt}", std::process::id()));
         match std::os::unix::fs::symlink(target, &tmp) {
             Ok(()) => {
+                clear_conflicting_directory(dst)?;
                 return fs::rename(&tmp, dst).map_err(|source| {
                     let _ = fs::remove_file(&tmp);
                     CacheError::Io { path: dst.to_path_buf(), source }

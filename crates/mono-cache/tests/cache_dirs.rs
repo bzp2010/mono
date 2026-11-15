@@ -128,3 +128,43 @@ fn concurrent_restores_of_one_entry_all_succeed() {
     }
     assert_eq!(fs::read(dest.join("f7.bin")).unwrap(), vec![7u8; 4096]);
 }
+
+#[test]
+fn restore_replaces_a_directory_where_the_snapshot_has_a_link() {
+    let project = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let modules = project.path().join("node_modules");
+    fs::create_dir_all(modules.join("typescript")).unwrap();
+    fs::write(modules.join("typescript/tsc"), "compiler").unwrap();
+    std::os::unix::fs::symlink("typescript", modules.join("pkg")).unwrap();
+
+    let backend = LocalBackend::new(store.path().to_path_buf());
+    backend.put_dir("k7", &modules).unwrap();
+
+    // The destination now has a real directory at the place of the link.
+    fs::remove_file(modules.join("pkg")).unwrap();
+    fs::create_dir_all(modules.join("pkg")).unwrap();
+    fs::write(modules.join("pkg/stale"), "x").unwrap();
+
+    assert!(backend.get_dir("k7", &modules).unwrap());
+    assert!(fs::symlink_metadata(modules.join("pkg")).unwrap().file_type().is_symlink());
+}
+
+#[test]
+fn restore_replaces_a_directory_where_the_snapshot_has_a_file() {
+    let project = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let tree = project.path().join("tree");
+    fs::create_dir_all(&tree).unwrap();
+    fs::write(tree.join("item"), "file").unwrap();
+
+    let backend = LocalBackend::new(store.path().to_path_buf());
+    backend.put_dir("k8", &tree).unwrap();
+
+    fs::remove_file(tree.join("item")).unwrap();
+    fs::create_dir_all(tree.join("item")).unwrap();
+    fs::write(tree.join("item/inner"), "x").unwrap();
+
+    assert!(backend.get_dir("k8", &tree).unwrap());
+    assert_eq!(fs::read_to_string(tree.join("item")).unwrap(), "file");
+}
