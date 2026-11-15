@@ -12,7 +12,8 @@ Finds projects from each ecosystem's own workspace definition. It never guesses:
 ## Pitfalls
 
 - A Cargo workspace is one project, named after the workspace root directory. Crate-to-crate path dependencies are not recorded, because the graph has no crate-level nodes. Renaming the directory renames the project, since `project.json` has no name field yet.
-- A pnpm root package without a `name` takes its directory name. If that name is already taken by a member, discovery fails and asks for a `name` in the root `package.json`. A member without a `name` is an error.
+- Discovery never invents a name. A pnpm root package without a `name` is discovered unnamed, and so has no name here. The graph reports it unless `project.json` names it. A member without a `name` is an error.
+- Each discovered project has two names. `name` is the project's name, and `package_name` is the name that other packages use in dependency specs. Dependencies are recorded as package names, and the graph maps them to project names.
 - Workspace patterns starting with `!` exclude directories, as pnpm does. Exclusions are applied before member manifests are checked, so an excluded directory never needs a `package.json`.
 - A matched member directory without `package.json` is an error (`MissingManifest`), not a silent skip.
 - Semver ranges such as `^1.0.0` that resolve to a local member are not detected. Only exact versions and `file:` paths are edges.
