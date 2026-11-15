@@ -49,11 +49,18 @@ pub fn find_workspace_root(start: &Path) -> Result<PathBuf, CliError> {
 /// files, and builds the graph.
 pub fn load_workspace(root: &Path) -> Result<Workspace, CliError> {
     let config = load_root_config(root)?;
-    let discovered = discover(root, &config.ecosystems)?;
+    let mut discovered = discover(root, &config.ecosystems)?;
     let mut configs: BTreeMap<String, ProjectConfig> = BTreeMap::new();
-    for project in &discovered {
-        if let Some(cfg) = load_project_config(&project.root)? {
-            configs.insert(project.name.clone(), cfg);
+    for project in &mut discovered {
+        let Some(cfg) = load_project_config(&project.root)? else {
+            continue;
+        };
+        // A name in project.json is the project's name, whatever the ecosystem says.
+        if let Some(name) = cfg.name.clone() {
+            project.name = Some(name);
+        }
+        if let Some(name) = project.name.clone() {
+            configs.insert(name, cfg);
         }
     }
     let graph = build(discovered, &configs)?;

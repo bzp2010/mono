@@ -4,12 +4,17 @@ use std::path::PathBuf;
 
 use crate::config::Ecosystem;
 
-/// A project found by discovery, before explicit config is merged in.
+/// A project found by discovery, before `project.json` is merged in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredProject {
-    pub name: String,
+    /// The name the ecosystem gives the project, if it has one. A project without a
+    /// name must be given one in its `project.json`.
+    pub name: Option<String>,
+    /// The name other packages use for this project in dependency specs, if the
+    /// ecosystem has one. Dependencies are recorded with these names.
+    pub package_name: Option<String>,
     pub root: PathBuf,
     pub ecosystem: Ecosystem,
-    /// Dependencies inferred from the ecosystem's own workspace signals.
+    /// Dependencies inferred from the ecosystem's own workspace signals, as package names.
     pub dependencies: Vec<String>,
 }

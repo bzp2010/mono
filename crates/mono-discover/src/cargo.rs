@@ -36,7 +36,8 @@ pub fn discover_cargo(root: &Path) -> Result<Vec<DiscoveredProject>, DiscoverErr
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     Ok(vec![DiscoveredProject {
-        name,
+        name: Some(name),
+        package_name: None,
         root: workspace_root,
         ecosystem: Ecosystem::Cargo,
         dependencies: Vec::new(),

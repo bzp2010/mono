@@ -49,7 +49,8 @@ pub fn discover_npm(root: &Path) -> Result<Vec<DiscoveredProject>, DiscoverError
             }
         }
         projects.push(DiscoveredProject {
-            name,
+            name: Some(name.clone()),
+            package_name: Some(name),
             root: dir.clone(),
             ecosystem: Ecosystem::Npm,
             dependencies,

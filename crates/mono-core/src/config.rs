@@ -35,6 +35,8 @@ pub enum ConfigError {
     },
     #[error("invalid configuration: {0}")]
     Parse(#[from] serde_json::Error),
+    #[error("a project name must not be empty")]
+    InvalidName,
 }
 
 /// Parses the contents of a `mono.json` file.

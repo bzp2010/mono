@@ -24,6 +24,8 @@ pub enum GraphError {
     Cycle { path: Vec<String> },
     #[error("duplicate project name {name}")]
     DuplicateName { name: String },
+    #[error("project at {} has no name. Add a name to its project.json, or to its package.json", root.display())]
+    UnnamedProject { root: PathBuf },
     #[error("project {project} depends on target {target}, which it does not define")]
     MissingTarget { project: String, target: String },
     #[error("task cycle: {}", .path.join(" -> "))]
@@ -60,45 +62,72 @@ impl ProjectGraph {
 
 /// Builds the graph from discovered projects and explicit `project.json` configs.
 ///
-/// `configs` is keyed by project name. Projects without an entry get no targets
-/// and no explicit dependencies.
+/// `configs` is keyed by project name, which the caller has already resolved from
+/// `project.json` or the ecosystem. A discovered project without a name is an error.
+///
+/// Dependencies from discovery are package names. Each one resolves to the project
+/// that has that package name, or else to the project of that name. An explicit
+/// dependency in `project.json` names a project directly.
 pub fn build(
     discovered: Vec<DiscoveredProject>,
     configs: &BTreeMap<String, ProjectConfig>,
 ) -> Result<ProjectGraph, GraphError> {
+    let mut names: Vec<String> = Vec::new();
+    for d in &discovered {
+        let name = d
+            .name
+            .clone()
+            .ok_or_else(|| GraphError::UnnamedProject { root: d.root.clone() })?;
+        if names.contains(&name) {
+            return Err(GraphError::DuplicateName { name });
+        }
+        names.push(name);
+    }
+
+    // Package name to project name, for resolving discovered dependencies.
+    let by_package: BTreeMap<String, String> = discovered
+        .iter()
+        .zip(&names)
+        .filter_map(|(d, name)| d.package_name.clone().map(|p| (p, name.clone())))
+        .collect();
+
     let mut projects = BTreeMap::new();
     let mut deps: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for d in discovered {
-        if projects.contains_key(&d.name) {
-            return Err(GraphError::DuplicateName { name: d.name });
+    for (d, name) in discovered.iter().zip(&names) {
+        let mut merged: Vec<String> = Vec::new();
+        for dep in &d.dependencies {
+            let target = by_package
+                .get(dep)
+                .cloned()
+                .or_else(|| names.iter().find(|n| *n == dep).cloned())
+                .ok_or_else(|| GraphError::UnknownDependency {
+                    from: name.clone(),
+                    to: dep.clone(),
+                })?;
+            if !merged.contains(&target) {
+                merged.push(target);
+            }
         }
-        let cfg = configs.get(&d.name);
-        let mut merged = d.dependencies.clone();
-        if let Some(cfg) = cfg {
+        if let Some(cfg) = configs.get(name) {
             for dep in &cfg.dependencies {
+                if !names.contains(dep) {
+                    return Err(GraphError::UnknownDependency { from: name.clone(), to: dep.clone() });
+                }
                 if !merged.contains(dep) {
                     merged.push(dep.clone());
                 }
             }
         }
-        deps.insert(d.name.clone(), merged);
+        deps.insert(name.clone(), merged);
         projects.insert(
-            d.name.clone(),
+            name.clone(),
             Project {
-                name: d.name,
-                root: d.root,
+                name: name.clone(),
+                root: d.root.clone(),
                 ecosystem: d.ecosystem,
-                targets: cfg.map(|c| c.targets.clone()).unwrap_or_default(),
+                targets: configs.get(name).map(|c| c.targets.clone()).unwrap_or_default(),
             },
         );
-    }
-
-    for (from, list) in &deps {
-        for to in list {
-            if !projects.contains_key(to) {
-                return Err(GraphError::UnknownDependency { from: from.clone(), to: to.clone() });
-            }
-        }
     }
 
     let order = topo_sort(&deps)?;

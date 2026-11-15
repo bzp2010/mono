@@ -11,6 +11,10 @@ use crate::config::ConfigError;
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectConfig {
+    /// The project's name. It overrides the name the ecosystem gives, and is the
+    /// name other projects use in `dependencies` and `dependsOn`.
+    #[serde(default)]
+    pub name: Option<String>,
     /// Explicit dependencies on other projects, merged with inferred ones.
     #[serde(default)]
     pub dependencies: Vec<String>,
@@ -35,7 +39,11 @@ pub struct TargetConfig {
 
 /// Parses the contents of a `project.json` file.
 pub fn parse_project_config(json: &str) -> Result<ProjectConfig, ConfigError> {
-    Ok(serde_json::from_str(json)?)
+    let cfg: ProjectConfig = serde_json::from_str(json)?;
+    if cfg.name.as_deref() == Some("") {
+        return Err(ConfigError::InvalidName);
+    }
+    Ok(cfg)
 }
 
 /// Loads `project.json` from a project directory, or `None` if it is absent.

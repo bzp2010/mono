@@ -15,10 +15,12 @@ struct PnpmWorkspace {
     packages: Vec<String>,
 }
 
-/// Discovers pnpm packages: the root package (when the root has a
-/// `package.json`) and every member. Each is a project of its own. A
-/// dependency is an edge only when its spec uses the `workspace:` protocol and
-/// names another package.
+/// Discovers pnpm packages: the root package (when the root has a `package.json`)
+/// and every member. Each is a project of its own. A dependency is an edge only
+/// when its spec uses the `workspace:` protocol and names another package.
+///
+/// A root without a `name` is discovered unnamed. The graph reports it unless
+/// `project.json` names it.
 pub fn discover_pnpm(root: &Path) -> Result<Vec<DiscoveredProject>, DiscoverError> {
     let path = root.join("pnpm-workspace.yaml");
     let text = std::fs::read_to_string(&path)
@@ -38,51 +40,26 @@ pub fn discover_pnpm(root: &Path) -> Result<Vec<DiscoveredProject>, DiscoverErro
         packages.push((dir.clone(), read_package_json(&dir)?));
     }
 
-    let member_names: BTreeSet<String> = packages
-        .iter()
-        .filter(|(dir, _)| dir != root)
-        .filter_map(|(_, pkg)| pkg.name.clone())
-        .collect();
-    let mut named = Vec::new();
-    for (dir, pkg) in packages {
-        let name = match pkg.name.clone() {
-            Some(name) => name,
-            None if dir == root => {
-                // The directory name is a fallback, so it must not collide with a member.
-                let fallback = dir
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                if member_names.contains(&fallback) {
-                    return Err(DiscoverError::InvalidManifest {
-                        path: dir.join("package.json"),
-                        message: format!(
-                            "root package has no \"name\" and its directory name {fallback} is taken by a member"
-                        ),
-                    });
-                }
-                fallback
-            }
-            None => {
-                return Err(DiscoverError::InvalidManifest {
-                    path: dir.join("package.json"),
-                    message: "missing \"name\"".to_string(),
-                })
-            }
-        };
-        named.push((dir, name, pkg));
+    for (dir, pkg) in &packages {
+        if dir != root && pkg.name.is_none() {
+            return Err(DiscoverError::InvalidManifest {
+                path: dir.join("package.json"),
+                message: "missing \"name\"".to_string(),
+            });
+        }
     }
-    let names: BTreeSet<String> = named.iter().map(|(_, n, _)| n.clone()).collect();
+    let names: BTreeSet<String> = packages.iter().filter_map(|(_, pkg)| pkg.name.clone()).collect();
 
     let mut projects = Vec::new();
-    for (dir, name, pkg) in &named {
+    for (dir, pkg) in &packages {
         let dependencies = pkg
             .all_dependencies()
             .filter_map(|(dep, spec)| workspace_target(dep, spec))
             .filter(|target| names.contains(target))
             .collect();
         projects.push(DiscoveredProject {
-            name: name.clone(),
+            name: pkg.name.clone(),
+            package_name: pkg.name.clone(),
             root: dir.clone(),
             ecosystem: Ecosystem::Pnpm,
             dependencies,
