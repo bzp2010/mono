@@ -6,7 +6,7 @@ use mono_cache::LocalBackend;
 use std::collections::BTreeSet;
 
 use mono_graph::{affected, plan, task_dependencies, TaskId};
-use mono_task::{run_plan, TaskOutcome};
+use mono_task::{run_plan_in_workspace, TaskOutcome};
 
 use crate::context::{find_workspace_root, load_workspace, CliError};
 
@@ -40,7 +40,7 @@ pub fn run(target: &str, base: Option<&str>) -> Result<i32, CliError> {
         tasks.retain(|task| needed.contains(task));
     }
     let cache = LocalBackend::new(root.join(CACHE_DIR));
-    let results = run_plan(&workspace.graph, &tasks, Some(&cache))?;
+    let results = run_plan_in_workspace(&root, &workspace.graph, &tasks, Some(&cache))?;
 
     let mut code = 0;
     for (task, outcome) in &results {

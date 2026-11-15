@@ -162,3 +162,30 @@ fn a_root_lockfile_change_runs_every_project_of_its_ecosystem() {
         .stdout(contains("b:build: ok"))
         .stdout(contains("c:build: ok"));
 }
+
+#[test]
+fn a_changed_workspace_lockfile_invalidates_cached_outputs_on_a_plain_run() {
+    // The outputs of a task depend on the workspace lockfile, which its inputs cannot
+    // reach. A plain run after the lockfile changes must run the command, not restore
+    // outputs built with the old dependency versions.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let log = root.join("log.txt");
+    fs::write(root.join("mono.json"), r#"{"ecosystems":["pnpm"]}"#).unwrap();
+    fs::write(root.join("pnpm-workspace.yaml"), "packages:\n  - \"packages/*\"\n").unwrap();
+    fs::write(root.join("pnpm-lock.yaml"), "lockfileVersion: 1\n").unwrap();
+    fs::create_dir_all(root.join("packages/a")).unwrap();
+    fs::write(root.join("packages/a/package.json"), r#"{"name":"a","version":"1.0.0"}"#).unwrap();
+    fs::write(
+        root.join("packages/a/project.json"),
+        format!(
+            r#"{{"targets":{{"build":{{"command":"mkdir -p dist && echo built >> '{}' && echo x > dist/out","outputs":["dist/**"]}}}}}}"#,
+            log.display()
+        ),
+    )
+    .unwrap();
+    Mono::cargo_bin("mono").unwrap().current_dir(root).args(["run", "build"]).assert().success();
+    fs::write(root.join("pnpm-lock.yaml"), "lockfileVersion: 2\n").unwrap();
+    Mono::cargo_bin("mono").unwrap().current_dir(root).args(["run", "build"]).assert().success().stdout(contains("a:build: ok"));
+    assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), 2, "the command must run again");
+}
