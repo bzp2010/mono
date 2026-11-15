@@ -5,7 +5,8 @@ use std::path::Path;
 use std::process::Command;
 
 use mono_cache::{
-    dir_key, expand_files, output_digest, remove_stale, task_key, CacheBackend, CacheError,
+    check_cache_dir, dir_key, expand_files, output_digest, remove_stale, task_key, CacheBackend,
+    CacheError,
 };
 use mono_graph::{task_dependencies, GraphError, ProjectGraph, TaskId};
 use thiserror::Error;
@@ -83,12 +84,14 @@ pub fn run_plan(
             .collect();
         let key = task_key(task, config, root, &dep_contributions)?;
         let cacheable = cache.is_some() && !config.outputs.is_empty();
+        // Checked before the cache is consulted, so a bad name is refused on a hit too.
+        for dir in &config.cache_dirs {
+            check_cache_dir(dir)?;
+        }
 
-        // A hit replaces the outputs with the snapshot, so outputs from another
-        // version are removed first. A miss leaves them alone, because the
-        // command may be incremental and rely on them.
-        // A hit restores the snapshot first, then removes the outputs that are not
-        // part of it. A failed restore therefore never leaves the outputs half removed.
+        // A hit restores the snapshot first, then removes outputs that are not part
+        // of it. A miss leaves existing outputs alone, because the command may be
+        // incremental and rely on them.
         let cached = match cache {
             Some(backend) if cacheable && backend.contains(&key)? => {
                 let restored = backend.get(&key, root)?;

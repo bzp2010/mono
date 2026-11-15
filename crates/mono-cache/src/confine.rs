@@ -63,8 +63,12 @@ impl Tree {
                     path: e.path().to_path_buf(),
                     source: e.into(),
                 })?;
-                if !path.is_file() {
+                if path.is_dir() {
                     continue;
+                }
+                if !path.is_file() {
+                    // A named pipe, socket, or dangling link cannot be cached.
+                    return Err(CacheError::UnsupportedFile { path });
                 }
                 let rel = path
                     .strip_prefix(&self.root)
@@ -136,7 +140,7 @@ impl Tree {
             Ok(meta) if meta.is_dir() => Ok(()),
             // A failed removal surfaces from create_dir below, so it is not reported here.
             Ok(_) => {
-                let _ = fs::remove_file(&dst);
+                remove_non_directory(&dst)?;
                 create_dir(&dst)
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => create_dir(&dst),
@@ -146,16 +150,13 @@ impl Tree {
 
     /// Every entry beneath `under`, relative to it, with the directory itself as
     /// the first entry (empty path). Links are reported, not followed. A missing
-    /// `under` yields an empty list.
+    /// `under` is an error, so a caller never mistakes it for an empty tree.
     pub(crate) fn walk(&self, under: &Path) -> Result<Vec<(PathBuf, EntryKind)>, CacheError> {
         check_relative_path(under)?;
         self.check_ancestors(under)?;
         let base = self.root.join(under);
-        let meta = match fs::symlink_metadata(&base) {
-            Ok(meta) => meta,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => return Err(CacheError::Io { path: base, source }),
-        };
+        let meta = fs::symlink_metadata(&base)
+            .map_err(|source| CacheError::Io { path: base.clone(), source })?;
         if meta.file_type().is_symlink() {
             return Err(CacheError::ThroughLink { path: base });
         }
@@ -206,7 +207,7 @@ impl Tree {
                 // A link or file in an ancestor position is replaced by a directory.
                 // A failed removal surfaces from create_dir, which then fails.
                 Ok(_) => {
-                    let _ = fs::remove_file(&current);
+                    remove_non_directory(&current)?;
                     create_dir(&current)?;
                 }
                 Err(e) if e.kind() == io::ErrorKind::NotFound => create_dir(&current)?,
@@ -271,8 +272,26 @@ fn check_relative_path(path: &Path) -> Result<(), CacheError> {
 fn create_dir(path: &Path) -> Result<(), CacheError> {
     match fs::create_dir(path) {
         Ok(()) => Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists && path.is_dir() => Ok(()),
+        // symlink_metadata, not is_dir: a link to a directory must not pass as one.
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => match fs::symlink_metadata(path) {
+            Ok(meta) if meta.is_dir() => Ok(()),
+            _ => Err(CacheError::Io { path: path.to_path_buf(), source: e }),
+        },
         Err(source) => Err(CacheError::Io { path: path.to_path_buf(), source }),
+    }
+}
+
+/// Removes a link or a file that sits where a directory is needed. A removal that
+/// fails is tolerated only when another restore has already replaced the path
+/// with a directory; any other failure is reported.
+fn remove_non_directory(path: &Path) -> Result<(), CacheError> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => match fs::symlink_metadata(path) {
+            Ok(meta) if meta.is_dir() => Ok(()),
+            _ => Err(CacheError::Io { path: path.to_path_buf(), source }),
+        },
     }
 }
 
@@ -282,8 +301,11 @@ fn clear_real_directory(dst: &Path) -> Result<(), CacheError> {
     match fs::symlink_metadata(dst) {
         Ok(meta) if meta.is_dir() => match fs::remove_dir_all(dst) {
             Ok(()) => Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(source) => Err(CacheError::Io { path: dst.to_path_buf(), source }),
+            Err(source) => match fs::symlink_metadata(dst) {
+                // Another restore removed or replaced it first. That is success.
+                Ok(now) if now.is_dir() => Err(CacheError::Io { path: dst.to_path_buf(), source }),
+                _ => Ok(()),
+            },
         },
         _ => Ok(()),
     }

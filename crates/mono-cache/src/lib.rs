@@ -16,6 +16,12 @@ mod local;
 pub use key::{dir_key, expand_files, output_digest, remove_matching, remove_stale, task_key};
 pub use local::LocalBackend;
 
+/// Checks a `cacheDirs` name without touching the filesystem. The runner calls it
+/// before the cache is consulted, so an invalid name is refused on every run.
+pub fn check_cache_dir(dir: &str) -> Result<(), CacheError> {
+    confine::check_dir_name(Path::new(dir))
+}
+
 /// Errors raised by cache keys and backends.
 #[derive(Debug, Error)]
 pub enum CacheError {
