@@ -25,6 +25,19 @@ const ECOSYSTEM_INPUTS: &[(Ecosystem, &str)] = &[
 /// ecosystem.
 const WORKSPACE_INPUTS: &[&str] = &["mono.json"];
 
+/// The workspace-level files that can change the outputs of projects of `ecosystem`:
+/// its lockfiles and toolchain files, and `mono.json`, whether or not they exist.
+pub fn workspace_input_files(workspace_root: &Path, ecosystem: Ecosystem) -> Vec<PathBuf> {
+    let mut names: Vec<&str> = WORKSPACE_INPUTS.to_vec();
+    names.extend(
+        ECOSYSTEM_INPUTS
+            .iter()
+            .filter(|(e, _)| *e == ecosystem)
+            .map(|(_, name)| *name),
+    );
+    names.into_iter().map(|n| workspace_root.join(n)).collect()
+}
+
 /// The projects affected by changes to `changed` files.
 ///
 /// A file belongs to the projects whose root is its most specific ancestor. Files

@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
-use mono_cache::{expand_files, output_digest, remove_stale, task_key, CacheBackend, CacheError};
+use mono_cache::{
+    expand_files, files_digest, output_digest, remove_stale, task_key, CacheBackend, CacheError,
+};
 use mono_graph::{task_dependencies, GraphError, ProjectGraph, TaskId};
 use thiserror::Error;
 
@@ -66,8 +68,32 @@ pub fn run_plan(
     plan: &[TaskId],
     cache: Option<&dyn CacheBackend>,
 ) -> Result<Vec<(TaskId, TaskOutcome)>, RunError> {
+    run_tasks(graph, plan, cache, None)
+}
+
+/// Like [`run_plan`], and also keys each task on the workspace-level inputs of its
+/// ecosystem: its lockfiles, toolchain files, and `mono.json`. Those files are
+/// outside every project and cannot be declared as task inputs, but a change to
+/// them changes what the task builds.
+pub fn run_plan_in_workspace(
+    workspace: &Path,
+    graph: &ProjectGraph,
+    plan: &[TaskId],
+    cache: Option<&dyn CacheBackend>,
+) -> Result<Vec<(TaskId, TaskOutcome)>, RunError> {
+    run_tasks(graph, plan, cache, Some(workspace))
+}
+
+fn run_tasks(
+    graph: &ProjectGraph,
+    plan: &[TaskId],
+    cache: Option<&dyn CacheBackend>,
+    workspace: Option<&Path>,
+) -> Result<Vec<(TaskId, TaskOutcome)>, RunError> {
     // Each finished task's contribution to its dependents' keys.
     let mut contributions: BTreeMap<TaskId, String> = BTreeMap::new();
+    // Workspace input digests, one per ecosystem, computed once.
+    let mut workspace_digests: BTreeMap<mono_core::Ecosystem, String> = BTreeMap::new();
     let mut results = Vec::new();
     for task in plan {
         let unknown = || RunError::Unknown { task: task.to_string() };
@@ -75,10 +101,22 @@ pub fn run_plan(
         let config = project.targets.get(&task.target).ok_or_else(unknown)?;
         let root = project.root.as_path();
 
-        let dep_contributions: Vec<String> = task_dependencies(graph, task)?
+        let mut dep_contributions: Vec<String> = task_dependencies(graph, task)?
             .iter()
             .map(|dep| contributions.get(dep).cloned().unwrap_or_default())
             .collect();
+        if let Some(workspace) = workspace {
+            let digest = match workspace_digests.get(&project.ecosystem) {
+                Some(digest) => digest.clone(),
+                None => {
+                    let files = mono_graph::workspace_input_files(workspace, project.ecosystem);
+                    let digest = files_digest(&files)?;
+                    workspace_digests.insert(project.ecosystem, digest.clone());
+                    digest
+                }
+            };
+            dep_contributions.push(format!("workspace-inputs:{digest}"));
+        }
         let key = task_key(task, config, root, &dep_contributions)?;
         let cacheable = cache.is_some() && !config.outputs.is_empty();
 
