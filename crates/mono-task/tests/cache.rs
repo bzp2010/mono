@@ -27,7 +27,6 @@ fn graph_with_output(root: &Path) -> ProjectGraph {
         inputs: vec!["src/**/*.txt".into()],
         outputs: vec!["dist/**".into()],
         depends_on: vec![],
-        cache_dirs: vec![],
     };
     let configs: BTreeMap<_, _> = [(
         "a".to_string(),
@@ -93,7 +92,6 @@ fn restore_leaves_exactly_the_snapshot_outputs() {
         inputs: vec!["version.txt".into()],
         outputs: vec!["dist/**".into()],
         depends_on: vec![],
-        cache_dirs: vec![],
     };
     let discovered = vec![DiscoveredProject {
         name: "a".into(),
@@ -140,7 +138,6 @@ fn cache_miss_keeps_existing_outputs() {
         inputs: vec![],
         outputs: vec!["dist/**".into()],
         depends_on: vec![],
-        cache_dirs: vec![],
     };
     let discovered = vec![DiscoveredProject {
         name: "a".into(),

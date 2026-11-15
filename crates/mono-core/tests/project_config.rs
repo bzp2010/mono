@@ -9,8 +9,7 @@ fn parses_full_target() {
                 "command": "tsc -b",
                 "inputs": ["src/**/*.ts"],
                 "outputs": ["dist/**"],
-                "dependsOn": ["^build"],
-                "cacheDirs": ["target"]
+                "dependsOn": ["^build"]
             }
         }
     }"#;
@@ -19,7 +18,6 @@ fn parses_full_target() {
     let build = &cfg.targets["build"];
     assert_eq!(build.command, "tsc -b");
     assert_eq!(build.depends_on, vec!["^build".to_string()]);
-    assert_eq!(build.cache_dirs, vec!["target".to_string()]);
 }
 
 #[test]
@@ -27,7 +25,7 @@ fn optional_fields_default_to_empty() {
     let cfg = parse_project_config(r#"{"targets":{"dev":{"command":"vite"}}}"#).unwrap();
     let dev = &cfg.targets["dev"];
     assert!(dev.inputs.is_empty() && dev.outputs.is_empty());
-    assert!(dev.depends_on.is_empty() && dev.cache_dirs.is_empty());
+    assert!(dev.depends_on.is_empty());
     assert!(cfg.dependencies.is_empty());
 }
 
@@ -46,4 +44,11 @@ fn rejects_native_tool_field() {
 fn missing_project_file_is_none() {
     let dir = tempfile::tempdir().unwrap();
     assert!(load_project_config(dir.path()).unwrap().is_none());
+}
+
+#[test]
+fn rejects_cache_dirs() {
+    // Only outputs are cached. A directory cache is not part of the model.
+    let json = r#"{"targets":{"build":{"command":"cargo build","cacheDirs":["target"]}}}"#;
+    assert!(parse_project_config(json).is_err());
 }

@@ -1,5 +1,5 @@
-//! Concurrent publishes and restores must neither fail spuriously nor expose a
-//! partial entry to a reader.
+//! Concurrent publishes and restores of output entries. An entry is immutable and
+//! appears in one rename, so a reader sees either no entry or a complete one.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,28 +7,32 @@ use std::sync::{Arc, Barrier};
 
 use mono_cache::{CacheBackend, LocalBackend};
 
-fn project_with_files(root: &Path, count: usize) {
+fn project_with_files(root: &Path, count: usize) -> Vec<PathBuf> {
     fs::create_dir_all(root.join("out")).unwrap();
-    for i in 0..count {
-        fs::write(root.join("out").join(format!("f{i}.bin")), vec![i as u8; 1024]).unwrap();
-    }
+    (0..count)
+        .map(|i| {
+            let rel = PathBuf::from(format!("out/f{i}.bin"));
+            fs::write(root.join(&rel), vec![i as u8; 1024]).unwrap();
+            rel
+        })
+        .collect()
 }
 
 #[test]
 fn concurrent_publishes_of_one_key_all_succeed() {
     let project = tempfile::tempdir().unwrap();
     let store = tempfile::tempdir().unwrap();
-    project_with_files(project.path(), 20);
+    let rel = project_with_files(project.path(), 20);
     let backend = Arc::new(LocalBackend::new(store.path().to_path_buf()));
     let root: PathBuf = project.path().to_path_buf();
     let barrier = Arc::new(Barrier::new(8));
     let handles: Vec<_> = (0..8)
         .map(|_| {
-            let (backend, root, barrier) = (backend.clone(), root.clone(), barrier.clone());
+            let (backend, root, barrier, rel) = (backend.clone(), root.clone(), barrier.clone(), rel.clone());
             std::thread::spawn(move || {
                 barrier.wait();
                 for _ in 0..10 {
-                    backend.put_dir("pub", &root, Path::new("out")).unwrap();
+                    backend.put("pub", &root, &rel).unwrap();
                 }
             })
         })
@@ -40,36 +44,30 @@ fn concurrent_publishes_of_one_key_all_succeed() {
 }
 
 #[test]
-fn readers_never_see_a_partial_entry_while_it_is_republished() {
+fn readers_see_a_complete_entry_while_it_is_being_published() {
     let project = tempfile::tempdir().unwrap();
     let store = tempfile::tempdir().unwrap();
-    project_with_files(project.path(), 50);
+    let rel = project_with_files(project.path(), 50);
     let backend = Arc::new(LocalBackend::new(store.path().to_path_buf()));
-    backend.put_dir("live", project.path(), Path::new("out")).unwrap();
     let root: PathBuf = project.path().to_path_buf();
 
     let writer = {
-        let (backend, root) = (backend.clone(), root.clone());
+        let (backend, root, rel) = (backend.clone(), root.clone(), rel.clone());
         std::thread::spawn(move || {
             for _ in 0..30 {
-                backend.put_dir("live", &root, Path::new("out")).unwrap();
+                backend.put("live", &root, &rel).unwrap();
             }
         })
     };
     let readers: Vec<_> = (0..4)
-        .map(|i| {
+        .map(|_| {
             let (backend, root) = (backend.clone(), root.clone());
             std::thread::spawn(move || {
-                // Each reader has its own destination, so readers do not interfere.
-                let rel = format!("restored-{i}");
-                let dest = root.join(&rel);
                 for _ in 0..30 {
-                    // While an entry is replaced, a reader may see a miss, which the
-                    // caller treats as "run the command". It must never see a partial
-                    // restore: a hit always yields the complete set of files.
-                    let _ = fs::remove_dir_all(&dest);
-                    if backend.get_dir("live", &root, Path::new(&rel)).unwrap() {
-                        assert_eq!(fs::read_dir(&dest).unwrap().count(), 50);
+                    // A hit must restore every file. A miss is allowed only before the
+                    // first publish, and the entry never shows a partial set.
+                    if let Some(files) = backend.get("live", &root).unwrap() {
+                        assert_eq!(files.len(), 50, "a hit must restore every file");
                     }
                 }
             })
@@ -82,23 +80,54 @@ fn readers_never_see_a_partial_entry_while_it_is_republished() {
 }
 
 #[test]
-fn concurrent_restores_over_placeholders_all_succeed() {
-    // The destination holds placeholders where the snapshot has directories and
-    // files. The placeholders are created once, then every thread restores into
-    // them at the same time. Each restore must replace them and succeed.
+fn outputs_are_immutable_once_published() {
+    // Twelve writers publish different content under one key. The first one wins,
+    // and every later restore must return the same bytes.
     let project = tempfile::tempdir().unwrap();
     let store = tempfile::tempdir().unwrap();
-    fs::create_dir_all(project.path().join("tree/d")).unwrap();
-    for i in 0..20 {
-        fs::write(project.path().join(format!("tree/d/f{i}")), "x").unwrap();
-    }
-    let backend = Arc::new(LocalBackend::new(store.path().to_path_buf()));
-    backend.put_dir("ph", project.path(), Path::new("tree")).unwrap();
-
     let root: PathBuf = project.path().to_path_buf();
-    fs::create_dir_all(root.join("dest")).unwrap();
-    fs::write(root.join("dest/d"), "placeholder file").unwrap();
+    let backend = Arc::new(LocalBackend::new(store.path().to_path_buf()));
+    let barrier = Arc::new(Barrier::new(12));
+    let handles: Vec<_> = (0..12u8)
+        .map(|i| {
+            let (backend, root, barrier) = (backend.clone(), root.clone(), barrier.clone());
+            std::thread::spawn(move || {
+                fs::write(root.join("out.txt"), format!("writer {i}")).unwrap();
+                barrier.wait();
+                backend.put("imm", &root, &[PathBuf::from("out.txt")]).unwrap();
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    fs::remove_file(root.join("out.txt")).unwrap();
+    assert!(backend.get("imm", &root).unwrap().is_some());
+    let first = fs::read_to_string(root.join("out.txt")).unwrap();
+    for _ in 0..20 {
+        fs::remove_file(root.join("out.txt")).unwrap();
+        backend.get("imm", &root).unwrap();
+        assert_eq!(fs::read_to_string(root.join("out.txt")).unwrap(), first);
+    }
+}
 
+#[test]
+fn concurrent_restores_replace_placeholders_with_files() {
+    // The destination holds a directory where the entry has a file. Every thread
+    // restores at once, and every restore must succeed.
+    let project = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let rel = project_with_files(project.path(), 20);
+    let backend = Arc::new(LocalBackend::new(store.path().to_path_buf()));
+    let root: PathBuf = project.path().to_path_buf();
+    backend.put("ph", &root, &rel).unwrap();
+
+    // Placeholders: a directory where each output file belongs.
+    for r in &rel {
+        fs::remove_file(root.join(r)).unwrap();
+        fs::create_dir_all(root.join(r)).unwrap();
+        fs::write(root.join(r).join("inner"), "placeholder").unwrap();
+    }
     let barrier = Arc::new(Barrier::new(8));
     let handles: Vec<_> = (0..8)
         .map(|_| {
@@ -106,7 +135,7 @@ fn concurrent_restores_over_placeholders_all_succeed() {
             std::thread::spawn(move || {
                 barrier.wait();
                 for _ in 0..10 {
-                    backend.get_dir("ph", &root, Path::new("dest")).unwrap();
+                    assert!(backend.get("ph", &root).unwrap().is_some());
                 }
             })
         })
@@ -114,6 +143,32 @@ fn concurrent_restores_over_placeholders_all_succeed() {
     for h in handles {
         h.join().unwrap();
     }
-    assert!(root.join("dest/d").is_dir());
-    assert_eq!(fs::read_dir(root.join("dest/d")).unwrap().count(), 20);
+    for r in &rel {
+        assert!(root.join(r).is_file());
+    }
+}
+
+#[test]
+fn publishes_of_one_key_never_fail_however_many_race() {
+    let project = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let rel = project_with_files(project.path(), 10);
+    let root: PathBuf = project.path().to_path_buf();
+    let backend = Arc::new(LocalBackend::new(store.path().to_path_buf()));
+    let barrier = Arc::new(Barrier::new(48));
+    let handles: Vec<_> = (0..48)
+        .map(|_| {
+            let (backend, root, barrier, rel) = (backend.clone(), root.clone(), barrier.clone(), rel.clone());
+            std::thread::spawn(move || {
+                barrier.wait();
+                for _ in 0..20 {
+                    backend.put("many", &root, &rel).unwrap();
+                }
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    assert!(backend.contains("many").unwrap());
 }

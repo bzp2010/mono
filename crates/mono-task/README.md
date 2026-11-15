@@ -11,7 +11,7 @@ Runs target commands and combines execution with the cache.
 ## Pitfalls
 
 - On a cache hit, every file matching the target's outputs is removed before the snapshot is restored, so the restored set is the complete output set. On a miss, existing outputs are left alone, because the command may be incremental and rely on them.
-- A task with `outputs` is skipped on a cache hit. A task with only `cacheDirs` always runs its command. Its directories are restored before the run and saved after a successful run, so the tool can reuse its own incremental state.
+- A task with `outputs` is skipped on a cache hit. A task without outputs always runs its command. Tools that keep their own incremental state, such as Cargo's `target/`, are not declared as outputs, so their commands always run and manage their own state.
 - A target without outputs and without a cache backend always runs. Its key still contributes to dependents.
 - A command killed by a signal is `RunError::Terminated`, not an exit code. The distinction keeps a crash from looking like a normal failure.
 - Commands run sequentially. There is no parallelism yet.

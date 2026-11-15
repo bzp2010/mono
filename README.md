@@ -9,7 +9,7 @@ Status: early development. The tool already manages this repository. Expect brea
 - **Workspace**: a directory containing `mono.json`. `mono` finds it by walking up from the current directory.
 - **Project**: a unit discovered from a workspace signal (a Cargo workspace, a pnpm or npm workspace member). Each project may have a `project.json`.
 - **Target**: a named shell command declared in `project.json`. `mono run <target>` runs it in every project that defines it and skips the others.
-- **Cache**: outputs of a target are cached by a hash of its inputs. Directories listed in `cacheDirs` are saved and restored as a whole.
+- **Cache**: the outputs of a target are cached under a key derived from its inputs. A target with no outputs is never cached, and its command always runs.
 
 ## Usage
 

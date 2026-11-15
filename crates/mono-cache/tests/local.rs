@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::fs;
 use std::path::PathBuf;
 
@@ -17,7 +16,8 @@ fn put_then_get_restores_outputs() {
     backend.put("k1", project.path(), &rel).unwrap();
     fs::remove_dir_all(project.path().join("dist")).unwrap();
 
-    assert!(backend.get("k1", project.path()).unwrap());
+    let restored = backend.get("k1", project.path()).unwrap();
+    assert_eq!(restored.map(|mut v| { v.sort(); v }), Some(rel));
     assert_eq!(fs::read_to_string(project.path().join("dist/index.js")).unwrap(), "one");
     assert_eq!(fs::read_to_string(project.path().join("dist/nested/b.js")).unwrap(), "two");
 }
@@ -27,7 +27,8 @@ fn get_misses_for_unknown_key() {
     let project = tempfile::tempdir().unwrap();
     let store = tempfile::tempdir().unwrap();
     let backend = LocalBackend::new(store.path().to_path_buf());
-    assert!(!backend.get("never-stored", project.path()).unwrap());
+    assert!(backend.get("never-stored", project.path()).unwrap().is_none());
+    assert!(!backend.contains("never-stored").unwrap());
 }
 
 #[test]
@@ -41,39 +42,57 @@ fn failed_put_leaves_no_entry() {
 
     let backend = LocalBackend::new(store.path().to_path_buf());
     assert!(backend.put("k2", project.path(), &rel).is_err());
-    assert!(!backend.get("k2", project.path()).unwrap());
+    assert!(!backend.contains("k2").unwrap());
+    assert!(backend.get("k2", project.path()).unwrap().is_none());
 }
 
 #[test]
-fn failed_put_dir_leaves_no_entry() {
-    // A named pipe cannot be cached. The walk fails part way, so no entry may appear.
+fn first_put_for_a_key_wins() {
     let project = tempfile::tempdir().unwrap();
     let store = tempfile::tempdir().unwrap();
-    let target = project.path().join("target");
-    fs::create_dir_all(&target).unwrap();
-    fs::write(target.join("a.bin"), "x").unwrap();
-    let fifo = target.join("pipe");
-    let status = std::process::Command::new("mkfifo").arg(&fifo).status().unwrap();
-    assert!(status.success());
-
+    let rel = vec![PathBuf::from("out.txt")];
     let backend = LocalBackend::new(store.path().to_path_buf());
-    assert!(backend.put_dir("k3", project.path(), Path::new("target")).is_err());
-    assert!(!backend.contains("k3").unwrap());
+
+    fs::write(project.path().join("out.txt"), "first").unwrap();
+    backend.put("kw", project.path(), &rel).unwrap();
+    fs::write(project.path().join("out.txt"), "second").unwrap();
+    backend.put("kw", project.path(), &rel).unwrap();
+
+    fs::remove_file(project.path().join("out.txt")).unwrap();
+    backend.get("kw", project.path()).unwrap();
+    assert_eq!(fs::read_to_string(project.path().join("out.txt")).unwrap(), "first");
 }
 
 #[test]
-fn an_empty_directory_is_not_an_entry() {
-    // A crash or a manual edit can leave a directory without the completion marker.
-    // It must not count as an entry, and a publish must replace it.
+fn a_user_file_named_like_an_old_marker_is_stored_and_restored() {
+    // There is no marker any more, so a project file with that name is ordinary data.
+    let project = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    fs::write(project.path().join(".mono-complete"), "user data").unwrap();
+    let backend = LocalBackend::new(store.path().to_path_buf());
+    backend.put("km", project.path(), &[PathBuf::from(".mono-complete")]).unwrap();
+    fs::remove_file(project.path().join(".mono-complete")).unwrap();
+    assert!(backend.get("km", project.path()).unwrap().is_some());
+    assert_eq!(fs::read_to_string(project.path().join(".mono-complete")).unwrap(), "user data");
+}
+
+#[test]
+fn a_missing_destination_is_an_error_not_a_miss() {
+    // The entry is present. The destination root does not exist, which is a bug in
+    // the caller and must surface instead of looking like a cache miss.
     let project = tempfile::tempdir().unwrap();
     let store = tempfile::tempdir().unwrap();
     fs::write(project.path().join("a.txt"), "x").unwrap();
-    fs::create_dir_all(store.path().join("ke")).unwrap();
     let backend = LocalBackend::new(store.path().to_path_buf());
-    assert!(!backend.contains("ke").unwrap());
-    assert!(!backend.get("ke", project.path()).unwrap());
+    backend.put("kt", project.path(), &[PathBuf::from("a.txt")]).unwrap();
+    let missing = project.path().join("does-not-exist");
+    assert!(backend.get("kt", &missing).is_err());
+}
 
-    backend.put("ke", project.path(), &[PathBuf::from("a.txt")]).unwrap();
-    assert!(backend.contains("ke").unwrap());
-    assert_eq!(backend.stored_files("ke").unwrap(), vec![PathBuf::from("a.txt")]);
+#[test]
+fn keys_must_be_plain_names() {
+    let store = tempfile::tempdir().unwrap();
+    let backend = LocalBackend::new(store.path().to_path_buf());
+    assert!(backend.contains("/etc").is_err());
+    assert!(backend.contains("../x").is_err());
 }

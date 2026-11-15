@@ -5,7 +5,7 @@ Configuration types and the shared project model. Other crates depend on this on
 ## What it owns
 
 - `mono.json` (`MonoConfig`): the list of ecosystems to discover. Only `cargo`, `pnpm`, and `npm` are valid. Unknown keys are rejected.
-- `project.json` (`ProjectConfig`, `TargetConfig`): explicit dependencies and targets. Each target has a `command` and optional `inputs`, `outputs`, `dependsOn`, and `cacheDirs`. Unknown keys are rejected, so native tool fields fail early.
+- `project.json` (`ProjectConfig`, `TargetConfig`): explicit dependencies and targets. Each target has a `command` and optional `inputs`, `outputs`, and `dependsOn`. Unknown keys are rejected, so native tool fields fail early.
 - `DiscoveredProject`: a project as found by discovery, before explicit config is merged.
 
 ## Pitfalls

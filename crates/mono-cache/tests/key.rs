@@ -11,7 +11,6 @@ fn target(inputs: &[&str]) -> TargetConfig {
         inputs: inputs.iter().map(|s| s.to_string()).collect(),
         outputs: vec!["dist/**".into()],
         depends_on: vec![],
-        cache_dirs: vec![],
     }
 }
 
