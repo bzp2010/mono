@@ -52,3 +52,10 @@ fn rejects_cache_dirs() {
     let json = r#"{"targets":{"build":{"command":"cargo build","cacheDirs":["target"]}}}"#;
     assert!(parse_project_config(json).is_err());
 }
+
+#[test]
+fn project_name_is_read_and_must_not_be_empty() {
+    let cfg = parse_project_config(r#"{"name":"renamed","targets":{}}"#).unwrap();
+    assert_eq!(cfg.name.as_deref(), Some("renamed"));
+    assert!(parse_project_config(r#"{"name":""}"#).is_err());
+}

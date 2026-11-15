@@ -13,7 +13,7 @@ fn find<'a>(
     projects: &'a [mono_core::DiscoveredProject],
     name: &str,
 ) -> &'a mono_core::DiscoveredProject {
-    projects.iter().find(|p| p.name == name).unwrap()
+    projects.iter().find(|p| p.name.as_deref() == Some(name)).unwrap()
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn glob_metacharacters_in_workspace_root_do_not_hide_members() {
     std::fs::write(root.join("pnpm-workspace.yaml"), "packages:\n  - \"packages/*\"\n").unwrap();
     std::fs::write(member.join("package.json"), r#"{"name":"x","version":"1.0.0"}"#).unwrap();
     let projects = discover(&root, &[Ecosystem::Pnpm]).unwrap();
-    assert_eq!(projects.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["x"]);
+    assert_eq!(projects.iter().map(|p| p.name.clone().unwrap()).collect::<Vec<_>>(), vec!["x".to_string()]);
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn pnpm_negative_pattern_removes_members_before_validation() {
     // packages/ignored has no package.json, but it is excluded, so it must
     // neither be a member nor make discovery fail.
     let projects = discover(&fixture("pnpm-exclude"), &[Ecosystem::Pnpm]).unwrap();
-    assert_eq!(projects.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["x"]);
+    assert_eq!(projects.iter().map(|p| p.name.clone().unwrap()).collect::<Vec<_>>(), vec!["x".to_string()]);
 }
 
 #[test]
@@ -72,8 +72,9 @@ fn pnpm_root_package_is_a_project_too() {
 }
 
 #[test]
-fn unnamed_pnpm_root_colliding_with_a_member_is_error() {
-    // The root takes its directory name, "x", which a member already has.
+fn unnamed_pnpm_root_is_discovered_without_a_name() {
+    // The root has no name and nothing is guessed for it. The graph reports it
+    // unless project.json names it, even when a member shares its directory name.
     let base = tempfile::tempdir().unwrap();
     let root = base.path().join("x");
     let member = root.join("packages/x");
@@ -81,8 +82,10 @@ fn unnamed_pnpm_root_colliding_with_a_member_is_error() {
     std::fs::write(root.join("pnpm-workspace.yaml"), "packages:\n  - \"packages/*\"\n").unwrap();
     std::fs::write(root.join("package.json"), r#"{"private":true}"#).unwrap();
     std::fs::write(member.join("package.json"), r#"{"name":"x","version":"1.0.0"}"#).unwrap();
-    let err = discover(&root, &[Ecosystem::Pnpm]).unwrap_err();
-    assert!(matches!(err, DiscoverError::InvalidManifest { .. }));
+    let projects = discover(&root, &[Ecosystem::Pnpm]).unwrap();
+    let unnamed = projects.iter().find(|p| p.root == root).unwrap();
+    assert!(unnamed.name.is_none());
+    assert!(unnamed.package_name.is_none());
 }
 
 #[test]

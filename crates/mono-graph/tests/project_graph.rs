@@ -7,7 +7,8 @@ use mono_graph::{build, GraphError};
 
 fn proj(name: &str, deps: &[&str]) -> DiscoveredProject {
     DiscoveredProject {
-        name: name.to_string(),
+        name: Some(name.to_string()),
+        package_name: None,
         root: PathBuf::from(format!("/ws/{name}")),
         ecosystem: Ecosystem::Npm,
         dependencies: deps.iter().map(|d| d.to_string()).collect(),
@@ -68,4 +69,43 @@ fn topo_order_puts_dependencies_first() {
     let order = graph.topo_order();
     let pos = |n: &str| order.iter().position(|x| *x == n).unwrap();
     assert!(pos("core") < pos("lib") && pos("lib") < pos("app"));
+}
+
+#[test]
+fn unnamed_project_is_error() {
+    let discovered = vec![DiscoveredProject {
+        name: None,
+        package_name: None,
+        root: PathBuf::from("/ws/root"),
+        ecosystem: Ecosystem::Npm,
+        dependencies: vec![],
+    }];
+    match build(discovered, &BTreeMap::new()).unwrap_err() {
+        GraphError::UnnamedProject { root } => assert_eq!(root, PathBuf::from("/ws/root")),
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+#[test]
+fn dependency_on_a_package_name_resolves_to_the_project_name() {
+    // The package is named `@scope/lib`, but its project is named `lib` by
+    // project.json. A dependency written with the package name must reach it.
+    let discovered = vec![
+        DiscoveredProject {
+            name: Some("app".to_string()),
+            package_name: Some("app".to_string()),
+            root: PathBuf::from("/ws/app"),
+            ecosystem: Ecosystem::Npm,
+            dependencies: vec!["@scope/lib".to_string()],
+        },
+        DiscoveredProject {
+            name: Some("lib".to_string()),
+            package_name: Some("@scope/lib".to_string()),
+            root: PathBuf::from("/ws/lib"),
+            ecosystem: Ecosystem::Npm,
+            dependencies: vec![],
+        },
+    ];
+    let graph = build(discovered, &BTreeMap::new()).unwrap();
+    assert_eq!(graph.deps_of("app"), &["lib".to_string()]);
 }

@@ -17,13 +17,15 @@ fn target(command: &str, depends_on: &[&str]) -> TargetConfig {
 fn two_projects() -> ProjectGraph {
     let discovered = vec![
         DiscoveredProject {
-            name: "a".into(),
+            name: Some("a".into()),
+            package_name: None,
             root: PathBuf::from("/ws/a"),
             ecosystem: Ecosystem::Npm,
             dependencies: vec![],
         },
         DiscoveredProject {
-            name: "b".into(),
+            name: Some("b".into()),
+            package_name: None,
             root: PathBuf::from("/ws/b"),
             ecosystem: Ecosystem::Npm,
             dependencies: vec!["a".into()],
@@ -65,13 +67,15 @@ fn missing_dependency_target_is_skipped() {
     // `a` has no `test`, so `^test` on `b` contributes nothing.
     let discovered = vec![
         DiscoveredProject {
-            name: "a".into(),
+            name: Some("a".into()),
+            package_name: None,
             root: PathBuf::from("/ws/a"),
             ecosystem: Ecosystem::Npm,
             dependencies: vec![],
         },
         DiscoveredProject {
-            name: "b".into(),
+            name: Some("b".into()),
+            package_name: None,
             root: PathBuf::from("/ws/b"),
             ecosystem: Ecosystem::Npm,
             dependencies: vec!["a".into()],
@@ -93,7 +97,8 @@ fn missing_dependency_target_is_skipped() {
 #[test]
 fn same_project_dependency_on_missing_target_is_error() {
     let discovered = vec![DiscoveredProject {
-        name: "a".into(),
+        name: Some("a".into()),
+        package_name: None,
         root: PathBuf::from("/ws/a"),
         ecosystem: Ecosystem::Npm,
         dependencies: vec![],
@@ -117,7 +122,8 @@ fn same_project_dependency_on_missing_target_is_error() {
 #[test]
 fn task_level_cycle_is_error() {
     let discovered = vec![DiscoveredProject {
-        name: "a".into(),
+        name: Some("a".into()),
+        package_name: None,
         root: PathBuf::from("/ws/a"),
         ecosystem: Ecosystem::Npm,
         dependencies: vec![],
