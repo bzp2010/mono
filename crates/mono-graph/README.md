@@ -14,3 +14,10 @@ Turns discovered projects and explicit config into a validated graph, and plans 
 - A bare `name` in `dependsOn` must exist in the same project. A missing one is `MissingTarget`, because a typo there would otherwise vanish silently.
 - A cycle among tasks in one project is `TaskCycle`. The project graph is acyclic by construction, but `dependsOn` edges inside a project are checked here.
 - Projects are visited in topological order, so plans are deterministic.
+- `affected(graph, changed)`: the projects that changed files belong to, and every project that depends on them, directly or through other projects. A file belongs to the project whose root is its most specific ancestor. Files outside every project belong to none.
+
+## Pitfalls
+
+- `affected` takes absolute paths in the same form as project roots. Relative paths match nothing.
+- A change to a file outside every project, such as a root config file, affects nothing. Workspace-wide inputs must be handled by the caller if they should count.
+- Dependencies of an affected project are not affected by it, so they are not run by `--affected`. Their outputs are unchanged.
