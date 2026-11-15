@@ -128,3 +128,25 @@ fn a_directory_name_with_a_trailing_space_works() {
     fs::write(dir.join("a.txt"), "changed").unwrap();
     assert_eq!(changed_files(&dir, "HEAD").unwrap(), vec![canonical(&dir).join("a.txt")]);
 }
+
+#[test]
+fn unrelated_histories_are_an_error_not_a_guess() {
+    // With no common ancestor there is no merge base. Falling back to the base tip
+    // could report no change where there is one, so the call must fail instead.
+    let dir = repo();
+    git(dir.path(), &["checkout", "-q", "--orphan", "other"]);
+    fs::write(dir.path().join("unrelated.txt"), "x").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-q", "-m", "unrelated"]);
+    let base = Command::new("git")
+        .current_dir(dir.path())
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .unwrap();
+    let other = String::from_utf8_lossy(&base.stdout).trim().to_string();
+    git(dir.path(), &["checkout", "-q", "--orphan", "third"]);
+    fs::write(dir.path().join("third.txt"), "y").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-q", "-m", "third"]);
+    assert!(changed_files(dir.path(), &other).is_err());
+}

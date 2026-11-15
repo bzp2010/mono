@@ -32,9 +32,11 @@ pub fn changed_files(dir: &Path, base: &str) -> Result<Vec<PathBuf>, VcsError> {
     let base_commit = git_text(&top, &["rev-parse", "--verify", "--end-of-options", &spec])?
         .trim()
         .to_string();
-    let point = git_text(&top, &["merge-base", &base_commit, "HEAD"])
-        .map(|s| s.trim().to_string())
-        .unwrap_or(base_commit);
+    // Without a merge base the comparison would be against an unrelated history, or
+    // a shallow clone may lack the commits needed. Either way, that is an error.
+    let point = git_text(&top, &["merge-base", &base_commit, "HEAD"])?
+        .trim()
+        .to_string();
 
     let mut files: BTreeSet<PathBuf> = BTreeSet::new();
     for rel in git_paths(&top, &["diff", "--name-only", "-z", "--no-renames", &point, "--"])? {
