@@ -10,6 +10,10 @@ use mono_task::{run_plan, TaskOutcome};
 /// One project `a`. Its `build` appends to `target/count.txt` and to `log.txt`,
 /// so the file contents show whether the directory was restored before the run.
 fn graph_with_cache_dir(root: &Path) -> ProjectGraph {
+    graph_with_cache_dir_at(root, "target")
+}
+
+fn graph_with_cache_dir_at(root: &Path, cache_dir: &str) -> ProjectGraph {
     let dir = root.join("a");
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("Cargo.lock"), "lock v1").unwrap();
@@ -28,7 +32,7 @@ fn graph_with_cache_dir(root: &Path) -> ProjectGraph {
         inputs: vec!["Cargo.lock".into()],
         outputs: vec![],
         depends_on: vec![],
-        cache_dirs: vec!["target".into()],
+        cache_dirs: vec![cache_dir.into()],
     };
     let configs: BTreeMap<_, _> = [(
         "a".to_string(),
@@ -78,4 +82,14 @@ fn cache_dir_is_not_restored_without_a_backend() {
     run_plan(&graph, &tasks, None).unwrap();
 
     assert_eq!(fs::read_to_string(root.path().join("a/target/count.txt")).unwrap(), "x\n");
+}
+
+#[test]
+fn cache_dirs_outside_the_project_are_rejected() {
+    let root = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let backend = LocalBackend::new(store.path().to_path_buf());
+    let graph = graph_with_cache_dir_at(root.path(), "../outside");
+    let tasks = plan(&graph, "build").unwrap();
+    assert!(run_plan(&graph, &tasks, Some(&backend)).is_err());
 }

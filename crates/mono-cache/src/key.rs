@@ -1,7 +1,7 @@
 //! Cache keys and digests over declared inputs and outputs.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use mono_core::TargetConfig;
 use mono_graph::TaskId;
@@ -15,6 +15,7 @@ use crate::CacheError;
 pub fn expand_files(root: &Path, patterns: &[String]) -> Result<Vec<PathBuf>, CacheError> {
     let mut out = Vec::new();
     for pattern in patterns {
+        check_relative(pattern)?;
         // The glob crate matches only directories for a trailing `**`, so
         // `dist/**` is rewritten to `dist/**/*` to mean every file beneath it.
         let normalized = match pattern.strip_suffix("/**") {
@@ -42,6 +43,18 @@ pub fn expand_files(root: &Path, patterns: &[String]) -> Result<Vec<PathBuf>, Ca
     out.sort();
     out.dedup();
     Ok(out)
+}
+
+/// Rejects patterns that could reach outside the project root: absolute paths
+/// and any `..` component. Such outputs would be removed or copied elsewhere.
+pub fn check_relative(pattern: &str) -> Result<(), CacheError> {
+    let escapes = Path::new(pattern)
+        .components()
+        .any(|c| matches!(c, Component::ParentDir | Component::RootDir | Component::Prefix(_)));
+    if escapes {
+        return Err(CacheError::OutsideProject { pattern: pattern.to_string() });
+    }
+    Ok(())
 }
 
 /// Computes the cache key of a task.

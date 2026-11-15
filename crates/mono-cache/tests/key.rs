@@ -96,3 +96,10 @@ fn changing_declared_outputs_changes_key() {
     t.outputs = vec!["dist/b".into()];
     assert_ne!(before, key(dir.path(), &t));
 }
+
+#[test]
+fn patterns_escaping_the_project_root_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(mono_cache::expand_files(dir.path(), &["../shared/**".to_string()]).is_err());
+    assert!(mono_cache::expand_files(dir.path(), &["/etc/*".to_string()]).is_err());
+}

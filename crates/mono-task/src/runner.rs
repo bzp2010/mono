@@ -5,7 +5,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use mono_cache::{dir_key, expand_files, output_digest, task_key, CacheBackend, CacheError};
+use mono_cache::{
+    check_relative, dir_key, expand_files, output_digest, task_key, CacheBackend, CacheError,
+};
 use mono_graph::{task_dependencies, GraphError, ProjectGraph, TaskId};
 use thiserror::Error;
 
@@ -89,6 +91,9 @@ pub fn run_plan(
         let key = task_key(task, config, root, &dep_contributions)?;
         let cacheable = cache.is_some() && !config.outputs.is_empty();
 
+        for dir in &config.cache_dirs {
+            check_relative(dir)?;
+        }
         if cacheable {
             // Remove outputs left by an earlier version, so a restored snapshot
             // is the complete output set and nothing else.

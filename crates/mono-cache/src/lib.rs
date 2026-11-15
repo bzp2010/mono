@@ -7,7 +7,7 @@ use thiserror::Error;
 mod key;
 mod local;
 
-pub use key::{dir_key, expand_files, output_digest, task_key};
+pub use key::{check_relative, dir_key, expand_files, output_digest, task_key};
 pub use local::LocalBackend;
 
 /// Errors raised by cache keys and backends.
@@ -19,6 +19,8 @@ pub enum CacheError {
         #[source]
         source: std::io::Error,
     },
+    #[error("pattern {pattern} must be relative to the project root and must not contain ..")]
+    OutsideProject { pattern: String },
     #[error("invalid glob {pattern}: {message}")]
     Glob { pattern: String, message: String },
 }
