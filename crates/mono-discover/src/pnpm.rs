@@ -38,14 +38,31 @@ pub fn discover_pnpm(root: &Path) -> Result<Vec<DiscoveredProject>, DiscoverErro
         packages.push((dir.clone(), read_package_json(&dir)?));
     }
 
+    let member_names: BTreeSet<String> = packages
+        .iter()
+        .filter(|(dir, _)| dir != root)
+        .filter_map(|(_, pkg)| pkg.name.clone())
+        .collect();
     let mut named = Vec::new();
     for (dir, pkg) in packages {
         let name = match pkg.name.clone() {
             Some(name) => name,
-            None if dir == root => dir
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default(),
+            None if dir == root => {
+                // The directory name is a fallback, so it must not collide with a member.
+                let fallback = dir
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if member_names.contains(&fallback) {
+                    return Err(DiscoverError::InvalidManifest {
+                        path: dir.join("package.json"),
+                        message: format!(
+                            "root package has no \"name\" and its directory name {fallback} is taken by a member"
+                        ),
+                    });
+                }
+                fallback
+            }
             None => {
                 return Err(DiscoverError::InvalidManifest {
                     path: dir.join("package.json"),

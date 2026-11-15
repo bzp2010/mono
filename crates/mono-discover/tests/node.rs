@@ -70,3 +70,17 @@ fn pnpm_root_package_is_a_project_too() {
     assert_eq!(root.dependencies, vec!["x".to_string()]);
     assert!(find(&projects, "x").dependencies.is_empty());
 }
+
+#[test]
+fn unnamed_pnpm_root_colliding_with_a_member_is_error() {
+    // The root takes its directory name, "x", which a member already has.
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("x");
+    let member = root.join("packages/x");
+    std::fs::create_dir_all(&member).unwrap();
+    std::fs::write(root.join("pnpm-workspace.yaml"), "packages:\n  - \"packages/*\"\n").unwrap();
+    std::fs::write(root.join("package.json"), r#"{"private":true}"#).unwrap();
+    std::fs::write(member.join("package.json"), r#"{"name":"x","version":"1.0.0"}"#).unwrap();
+    let err = discover(&root, &[Ecosystem::Pnpm]).unwrap_err();
+    assert!(matches!(err, DiscoverError::InvalidManifest { .. }));
+}
