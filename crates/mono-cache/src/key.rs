@@ -30,6 +30,7 @@ pub fn remove_matching(root: &Path, patterns: &[String]) -> Result<(), CacheErro
 /// another version disappear.
 pub fn remove_stale(root: &Path, patterns: &[String], keep: &[PathBuf]) -> Result<(), CacheError> {
     let tree = Tree::new(root);
+    let keep: std::collections::HashSet<&PathBuf> = keep.iter().collect();
     for rel in tree.expand(patterns)? {
         if !keep.contains(&rel) {
             tree.remove_file(&rel)?;

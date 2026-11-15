@@ -45,11 +45,14 @@ fn concurrent_publishes_of_one_key_all_succeed() {
 
 #[test]
 fn readers_see_a_complete_entry_while_it_is_being_published() {
+    // The entry exists before any reader starts, and publishing is first-wins, so
+    // every restore must be a hit that restores all fifty files.
     let project = tempfile::tempdir().unwrap();
     let store = tempfile::tempdir().unwrap();
     let rel = project_with_files(project.path(), 50);
     let backend = Arc::new(LocalBackend::new(store.path().to_path_buf()));
     let root: PathBuf = project.path().to_path_buf();
+    backend.put("live", &root, &rel).unwrap();
 
     let writer = {
         let (backend, root, rel) = (backend.clone(), root.clone(), rel.clone());
@@ -63,13 +66,14 @@ fn readers_see_a_complete_entry_while_it_is_being_published() {
         .map(|_| {
             let (backend, root) = (backend.clone(), root.clone());
             std::thread::spawn(move || {
+                let mut hits = 0;
                 for _ in 0..30 {
-                    // A hit must restore every file. A miss is allowed only before the
-                    // first publish, and the entry never shows a partial set.
-                    if let Some(files) = backend.get("live", &root).unwrap() {
-                        assert_eq!(files.len(), 50, "a hit must restore every file");
-                    }
+                    let files = backend.get("live", &root).unwrap();
+                    let files = files.expect("the entry exists, so every restore is a hit");
+                    assert_eq!(files.len(), 50, "a hit must restore every file");
+                    hits += 1;
                 }
+                assert_eq!(hits, 30);
             })
         })
         .collect();
@@ -81,33 +85,42 @@ fn readers_see_a_complete_entry_while_it_is_being_published() {
 
 #[test]
 fn outputs_are_immutable_once_published() {
-    // Twelve writers publish different content under one key. The first one wins,
-    // and every later restore must return the same bytes.
-    let project = tempfile::tempdir().unwrap();
+    // A winner publishes first. Then twelve writers, each with its own source and
+    // different bytes, publish under the same key. Every later restore must still
+    // return the winner's bytes.
+    let base = tempfile::tempdir().unwrap();
     let store = tempfile::tempdir().unwrap();
-    let root: PathBuf = project.path().to_path_buf();
     let backend = Arc::new(LocalBackend::new(store.path().to_path_buf()));
+    let rel = vec![PathBuf::from("out.txt")];
+
+    let winner = base.path().join("winner");
+    fs::create_dir_all(&winner).unwrap();
+    fs::write(winner.join("out.txt"), "winner").unwrap();
+    backend.put("imm", &winner, &rel).unwrap();
+
     let barrier = Arc::new(Barrier::new(12));
     let handles: Vec<_> = (0..12u8)
         .map(|i| {
-            let (backend, root, barrier) = (backend.clone(), root.clone(), barrier.clone());
+            let (backend, barrier, rel) = (backend.clone(), barrier.clone(), rel.clone());
+            let dir = base.path().join(format!("writer-{i}"));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("out.txt"), format!("writer {i}")).unwrap();
             std::thread::spawn(move || {
-                fs::write(root.join("out.txt"), format!("writer {i}")).unwrap();
                 barrier.wait();
-                backend.put("imm", &root, &[PathBuf::from("out.txt")]).unwrap();
+                backend.put("imm", &dir, &rel).unwrap();
             })
         })
         .collect();
     for h in handles {
         h.join().unwrap();
     }
-    fs::remove_file(root.join("out.txt")).unwrap();
-    assert!(backend.get("imm", &root).unwrap().is_some());
-    let first = fs::read_to_string(root.join("out.txt")).unwrap();
+
     for _ in 0..20 {
-        fs::remove_file(root.join("out.txt")).unwrap();
-        backend.get("imm", &root).unwrap();
-        assert_eq!(fs::read_to_string(root.join("out.txt")).unwrap(), first);
+        let restored = base.path().join("restored");
+        let _ = fs::remove_dir_all(&restored);
+        fs::create_dir_all(&restored).unwrap();
+        assert!(backend.get("imm", &restored).unwrap().is_some());
+        assert_eq!(fs::read_to_string(restored.join("out.txt")).unwrap(), "winner");
     }
 }
 
