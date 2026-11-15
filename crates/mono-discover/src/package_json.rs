@@ -58,7 +58,9 @@ pub(crate) fn read_package_json(dir: &Path) -> Result<PackageJson, DiscoverError
 pub(crate) fn expand_members(root: &Path, patterns: &[String]) -> Result<Vec<PathBuf>, DiscoverError> {
     let mut dirs = Vec::new();
     for pattern in patterns {
-        let full = root.join(pattern);
+        // The root is escaped so that metacharacters in its path match literally.
+        let escaped_root = glob::Pattern::escape(&root.to_string_lossy());
+        let full = PathBuf::from(escaped_root).join(pattern);
         let entries = glob::glob(&full.to_string_lossy()).map_err(|e| {
             DiscoverError::InvalidPattern { pattern: pattern.clone(), message: e.to_string() }
         })?;
