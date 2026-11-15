@@ -92,8 +92,6 @@ fn run_tasks(
 ) -> Result<Vec<(TaskId, TaskOutcome)>, RunError> {
     // Each finished task's contribution to its dependents' keys.
     let mut contributions: BTreeMap<TaskId, String> = BTreeMap::new();
-    // Workspace input digests, one per ecosystem, computed once.
-    let mut workspace_digests: BTreeMap<mono_core::Ecosystem, String> = BTreeMap::new();
     let mut results = Vec::new();
     for task in plan {
         let unknown = || RunError::Unknown { task: task.to_string() };
@@ -106,15 +104,11 @@ fn run_tasks(
             .map(|dep| contributions.get(dep).cloned().unwrap_or_default())
             .collect();
         if let Some(workspace) = workspace {
-            let digest = match workspace_digests.get(&project.ecosystem) {
-                Some(digest) => digest.clone(),
-                None => {
-                    let files = mono_graph::workspace_input_files(workspace, project.ecosystem);
-                    let digest = files_digest(&files)?;
-                    workspace_digests.insert(project.ecosystem, digest.clone());
-                    digest
-                }
-            };
+            // Computed for each task, not once per ecosystem: an earlier task of the
+            // plan may have rewritten a lockfile, and this task must be keyed on the
+            // lockfile as it is now. Unchanged inputs give the same digest.
+            let files = mono_graph::workspace_input_files(workspace, project.ecosystem);
+            let digest = files_digest(&files)?;
             dep_contributions.push(format!("workspace-inputs:{digest}"));
         }
         let key = task_key(task, config, root, &dep_contributions)?;
