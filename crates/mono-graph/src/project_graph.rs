@@ -24,6 +24,8 @@ pub enum GraphError {
     Cycle { path: Vec<String> },
     #[error("duplicate project name {name}")]
     DuplicateName { name: String },
+    #[error("two projects are named with the package name {package}, so dependencies on it are ambiguous")]
+    DuplicatePackageName { package: String },
     #[error("project at {} has no name. Add a name to its project.json, or to its package.json", root.display())]
     UnnamedProject { root: PathBuf },
     #[error("project {project} depends on target {target}, which it does not define")]
@@ -84,12 +86,17 @@ pub fn build(
         names.push(name);
     }
 
-    // Package name to project name, for resolving discovered dependencies.
-    let by_package: BTreeMap<String, String> = discovered
-        .iter()
-        .zip(&names)
-        .filter_map(|(d, name)| d.package_name.clone().map(|p| (p, name.clone())))
-        .collect();
+    // Package name to project name, for resolving discovered dependencies. Two
+    // projects with one package name would make a dependency on it ambiguous.
+    let mut by_package: BTreeMap<String, String> = BTreeMap::new();
+    for (d, name) in discovered.iter().zip(&names) {
+        let Some(package) = &d.package_name else {
+            continue;
+        };
+        if by_package.insert(package.clone(), name.clone()).is_some() {
+            return Err(GraphError::DuplicatePackageName { package: package.clone() });
+        }
+    }
 
     let mut projects = BTreeMap::new();
     let mut deps: BTreeMap<String, Vec<String>> = BTreeMap::new();

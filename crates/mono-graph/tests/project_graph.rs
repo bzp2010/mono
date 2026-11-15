@@ -109,3 +109,28 @@ fn dependency_on_a_package_name_resolves_to_the_project_name() {
     let graph = build(discovered, &BTreeMap::new()).unwrap();
     assert_eq!(graph.deps_of("app"), &["lib".to_string()]);
 }
+
+#[test]
+fn duplicate_package_names_are_error() {
+    // Two projects with one package name would make a dependency on it ambiguous.
+    let discovered = vec![
+        DiscoveredProject {
+            name: Some("a".to_string()),
+            package_name: Some("shared".to_string()),
+            root: PathBuf::from("/ws/a"),
+            ecosystem: Ecosystem::Npm,
+            dependencies: vec![],
+        },
+        DiscoveredProject {
+            name: Some("b".to_string()),
+            package_name: Some("shared".to_string()),
+            root: PathBuf::from("/ws/b"),
+            ecosystem: Ecosystem::Npm,
+            dependencies: vec![],
+        },
+    ];
+    match build(discovered, &BTreeMap::new()).unwrap_err() {
+        GraphError::DuplicatePackageName { package } => assert_eq!(package, "shared"),
+        other => panic!("unexpected {other:?}"),
+    }
+}

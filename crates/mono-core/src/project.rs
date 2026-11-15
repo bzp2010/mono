@@ -12,7 +12,7 @@ use crate::config::ConfigError;
 #[serde(deny_unknown_fields)]
 pub struct ProjectConfig {
     /// The project's name. It overrides the name the ecosystem gives, and is the
-    /// name other projects use in `dependencies` and `dependsOn`.
+    /// name other projects use in `dependencies`.
     #[serde(default)]
     pub name: Option<String>,
     /// Explicit dependencies on other projects, merged with inferred ones.
