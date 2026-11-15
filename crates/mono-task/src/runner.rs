@@ -94,33 +94,37 @@ pub fn run_plan(
         for dir in &config.cache_dirs {
             check_relative(dir)?;
         }
-        if cacheable {
-            // Remove outputs left by an earlier version, so a restored snapshot
-            // is the complete output set and nothing else.
-            for rel in expand_files(root, &config.outputs)? {
-                let path = root.join(&rel);
-                fs::remove_file(&path)
-                    .map_err(|source| RunError::Io { path: path.clone(), source })?;
-            }
-        }
-        let outcome = match cache {
-            Some(backend) if cacheable && backend.get(&key, root)? => TaskOutcome::Cached,
-            _ => {
-                // The command always runs. Tool-owned directories are restored
-                // before it, so the tool can use its own incremental state.
-                if let Some(backend) = cache {
-                    for dir in &config.cache_dirs {
-                        backend.get_dir(&dir_key(&key, dir), &root.join(dir))?;
-                    }
+        // A hit replaces the outputs with the snapshot, so outputs from another
+        // version are removed first. A miss leaves them alone, because the
+        // command may be incremental and rely on them.
+        let cached = match cache {
+            Some(backend) if cacheable && backend.contains(&key)? => {
+                for rel in expand_files(root, &config.outputs)? {
+                    let path = root.join(&rel);
+                    fs::remove_file(&path)
+                        .map_err(|source| RunError::Io { path: path.clone(), source })?;
                 }
-                let outcome = run_task(task, root, &config.command)?;
-                if let (Some(backend), TaskOutcome::Success) = (cache, &outcome) {
-                    for dir in &config.cache_dirs {
-                        backend.put_dir(&dir_key(&key, dir), &root.join(dir))?;
-                    }
-                }
-                outcome
+                backend.get(&key, root)?
             }
+            _ => false,
+        };
+        let outcome = if cached {
+            TaskOutcome::Cached
+        } else {
+            // The command always runs. Tool-owned directories are restored
+            // before it, so the tool can use its own incremental state.
+            if let Some(backend) = cache {
+                for dir in &config.cache_dirs {
+                    backend.get_dir(&dir_key(&key, dir), &root.join(dir))?;
+                }
+            }
+            let outcome = run_task(task, root, &config.command)?;
+            if let (Some(backend), TaskOutcome::Success) = (cache, &outcome) {
+                for dir in &config.cache_dirs {
+                    backend.put_dir(&dir_key(&key, dir), &root.join(dir))?;
+                }
+            }
+            outcome
         };
 
         let rel = expand_files(root, &config.outputs)?;

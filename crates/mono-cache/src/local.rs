@@ -47,6 +47,10 @@ impl LocalBackend {
 }
 
 impl CacheBackend for LocalBackend {
+    fn contains(&self, key: &str) -> Result<bool, CacheError> {
+        Ok(self.entry_dir(key).is_dir())
+    }
+
     fn get(&self, key: &str, project_root: &Path) -> Result<bool, CacheError> {
         let src = self.entry_dir(key);
         if !src.is_dir() {

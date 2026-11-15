@@ -124,3 +124,44 @@ fn restore_leaves_exactly_the_snapshot_outputs() {
     assert!(dir.join("dist/a.js").exists());
     assert!(!dir.join("dist/b.js").exists(), "output from the other version must be removed");
 }
+
+#[test]
+fn cache_miss_keeps_existing_outputs() {
+    // The command is incremental: it does not recreate dist/keep.txt, and the
+    // cache is empty. The miss must not remove the output the tool still needs.
+    let root = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let backend = LocalBackend::new(store.path().to_path_buf());
+    let dir = root.path().join("a");
+    fs::create_dir_all(dir.join("dist")).unwrap();
+    fs::write(dir.join("dist/keep.txt"), "built earlier").unwrap();
+    let target = TargetConfig {
+        command: "echo ran > ran.txt".into(),
+        inputs: vec![],
+        outputs: vec!["dist/**".into()],
+        depends_on: vec![],
+        cache_dirs: vec![],
+    };
+    let discovered = vec![DiscoveredProject {
+        name: "a".into(),
+        root: dir.clone(),
+        ecosystem: Ecosystem::Npm,
+        dependencies: vec![],
+    }];
+    let configs: BTreeMap<_, _> = [(
+        "a".to_string(),
+        ProjectConfig {
+            targets: [("build".to_string(), target)].into_iter().collect(),
+            ..Default::default()
+        },
+    )]
+    .into_iter()
+    .collect();
+    let graph = build(discovered, &configs).unwrap();
+    let tasks = plan(&graph, "build").unwrap();
+
+    let results = run_plan(&graph, &tasks, Some(&backend)).unwrap();
+
+    assert_eq!(results[0].1, TaskOutcome::Success);
+    assert!(dir.join("dist/keep.txt").exists(), "a miss must not remove existing outputs");
+}

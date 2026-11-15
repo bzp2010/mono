@@ -27,6 +27,8 @@ pub enum CacheError {
 
 /// Storage for task outputs, addressed by cache key.
 pub trait CacheBackend {
+    /// Whether a complete entry exists for `key`.
+    fn contains(&self, key: &str) -> Result<bool, CacheError>;
     /// Restores the entry for `key` into `project_root`. Returns `false` on a miss.
     fn get(&self, key: &str, project_root: &Path) -> Result<bool, CacheError>;
     /// Stores the files at `rel_paths` (relative to `project_root`) under `key`.
