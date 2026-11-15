@@ -93,14 +93,27 @@ impl CacheBackend for LocalBackend {
 }
 
 impl LocalBackend {
+    /// Copies a tree, keeping empty directories and symlinks as they are.
+    /// Symlinks are never followed, so a link into the tree is stored as a link.
     fn copy_tree(from: &Path, to: &Path) -> Result<(), CacheError> {
-        for entry in WalkDir::new(from) {
-            let entry = entry.map_err(|e| CacheError::Io { path: from.to_path_buf(), source: e.into() })?;
-            if !entry.file_type().is_file() {
-                continue;
-            }
+        for entry in WalkDir::new(from).follow_links(false) {
+            let entry = entry.map_err(|e| CacheError::Io {
+                path: from.to_path_buf(),
+                source: e.into(),
+            })?;
             let rel = entry.path().strip_prefix(from).expect("walked from root");
-            copy(entry.path(), &to.join(rel))?;
+            let dst = to.join(rel);
+            let kind = entry.file_type();
+            if kind.is_dir() {
+                fs::create_dir_all(&dst)
+                    .map_err(|source| CacheError::Io { path: dst.clone(), source })?;
+            } else if kind.is_symlink() {
+                let target = fs::read_link(entry.path())
+                    .map_err(|source| CacheError::Io { path: entry.path().to_path_buf(), source })?;
+                symlink_into_place(&target, &dst)?;
+            } else if kind.is_file() {
+                copy(entry.path(), &dst)?;
+            }
         }
         Ok(())
     }
@@ -119,4 +132,29 @@ fn copy(from: &Path, to: &Path) -> Result<(), CacheError> {
     fs::copy(from, &tmp)
         .map_err(|source| CacheError::Io { path: from.to_path_buf(), source })?;
     fs::rename(&tmp, to).map_err(|source| CacheError::Io { path: to.to_path_buf(), source })
+}
+
+/// Creates a symbolic link at `dst`, replacing whatever was there, through a
+/// temporary link that is renamed into place.
+fn symlink_into_place(target: &Path, dst: &Path) -> Result<(), CacheError> {
+    let parent = dst.parent().unwrap_or(Path::new("."));
+    fs::create_dir_all(parent)
+        .map_err(|source| CacheError::Io { path: parent.to_path_buf(), source })?;
+    for attempt in 0..1000u32 {
+        let tmp = parent.join(format!(".mono-link-{}-{attempt}", std::process::id()));
+        match std::os::unix::fs::symlink(target, &tmp) {
+            Ok(()) => {
+                return fs::rename(&tmp, dst).map_err(|source| {
+                    let _ = fs::remove_file(&tmp);
+                    CacheError::Io { path: dst.to_path_buf(), source }
+                });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(source) => return Err(CacheError::Io { path: tmp, source }),
+        }
+    }
+    Err(CacheError::Io {
+        path: dst.to_path_buf(),
+        source: std::io::Error::other("could not find a free temporary link name"),
+    })
 }

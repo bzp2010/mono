@@ -58,3 +58,24 @@ fn restore_succeeds_over_a_running_executable() {
 
     assert!(restored.unwrap());
 }
+
+#[test]
+fn symlinks_round_trip_without_being_followed() {
+    let project = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let modules = project.path().join("node_modules");
+    fs::create_dir_all(modules.join(".bin")).unwrap();
+    fs::create_dir_all(modules.join("typescript/bin")).unwrap();
+    fs::write(modules.join("typescript/bin/tsc"), "compiler").unwrap();
+    std::os::unix::fs::symlink("../typescript/bin/tsc", modules.join(".bin/tsc")).unwrap();
+
+    let backend = LocalBackend::new(store.path().to_path_buf());
+    backend.put_dir("k4", &modules).unwrap();
+    fs::remove_dir_all(&modules).unwrap();
+    assert!(backend.get_dir("k4", &modules).unwrap());
+
+    let link = modules.join(".bin/tsc");
+    assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read_link(&link).unwrap(), std::path::PathBuf::from("../typescript/bin/tsc"));
+    assert_eq!(fs::read_to_string(&link).unwrap(), "compiler");
+}
