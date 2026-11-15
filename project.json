@@ -1,0 +1,13 @@
+{
+  "targets": {
+    "build": {
+      "command": "cargo build --workspace",
+      "inputs": ["Cargo.lock"],
+      "cacheDirs": ["target"]
+    },
+    "test": {
+      "command": "cargo test --workspace",
+      "dependsOn": ["build"]
+    }
+  }
+}
