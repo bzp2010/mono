@@ -78,8 +78,8 @@ pub fn discover_pnpm(root: &Path) -> Result<Vec<DiscoveredProject>, DiscoverErro
     for (dir, name, pkg) in &named {
         let dependencies = pkg
             .all_dependencies()
-            .filter(|(dep, spec)| spec.starts_with("workspace:") && names.contains(*dep))
-            .map(|(dep, _)| dep.clone())
+            .filter_map(|(dep, spec)| workspace_target(dep, spec))
+            .filter(|target| names.contains(target))
             .collect();
         projects.push(DiscoveredProject {
             name: name.clone(),
@@ -89,4 +89,15 @@ pub fn discover_pnpm(root: &Path) -> Result<Vec<DiscoveredProject>, DiscoverErro
         });
     }
     Ok(projects)
+}
+
+/// The package a `workspace:` spec refers to. `workspace:*` and `workspace:^1.0.0`
+/// refer to the dependency's own name. `workspace:foo@*` is an alias, so it
+/// refers to `foo`, and a scoped name such as `@scope/foo@*` keeps its scope.
+fn workspace_target(dep: &str, spec: &str) -> Option<String> {
+    let rest = spec.strip_prefix("workspace:")?;
+    match rest.rfind('@') {
+        Some(i) if i > 0 => Some(rest[..i].to_string()),
+        _ => Some(dep.to_string()),
+    }
 }

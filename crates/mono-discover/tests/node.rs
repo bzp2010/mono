@@ -84,3 +84,17 @@ fn unnamed_pnpm_root_colliding_with_a_member_is_error() {
     let err = discover(&root, &[Ecosystem::Pnpm]).unwrap_err();
     assert!(matches!(err, DiscoverError::InvalidManifest { .. }));
 }
+
+#[test]
+fn pnpm_workspace_alias_resolves_to_the_target_package() {
+    // `bar` is an alias for the workspace package `foo`, so the edge points at `foo`.
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("ws");
+    let foo = root.join("packages/foo");
+    std::fs::create_dir_all(&foo).unwrap();
+    std::fs::write(root.join("pnpm-workspace.yaml"), "packages:\n  - \"packages/*\"\n").unwrap();
+    std::fs::write(root.join("package.json"), r#"{"name":"root","private":true,"devDependencies":{"bar":"workspace:foo@*"}}"#).unwrap();
+    std::fs::write(foo.join("package.json"), r#"{"name":"foo","version":"1.0.0"}"#).unwrap();
+    let projects = discover(&root, &[Ecosystem::Pnpm]).unwrap();
+    assert_eq!(find(&projects, "root").dependencies, vec!["foo".to_string()]);
+}
