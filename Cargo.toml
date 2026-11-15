@@ -8,4 +8,5 @@ members = [
     "crates/mono-task",
     "crates/mono-cli",
     "crates/mono-vcs-git",
+    "crates/mono-release",
 ]
