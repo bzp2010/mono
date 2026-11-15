@@ -100,3 +100,46 @@ fn affected_with_a_base_compares_against_that_revision() {
         .success()
         .stdout(contains("c:build: ok"));
 }
+
+#[test]
+fn affected_runs_the_upstream_tasks_that_its_outputs_depend_on() {
+    // `b` reads the output of `a`. Only `b` changed, but a fresh checkout has no
+    // output of `a` yet, so `a:build` must run before `b:build`.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(root.join("mono.json"), r#"{"ecosystems":["pnpm"]}"#).unwrap();
+    fs::write(root.join("pnpm-workspace.yaml"), "packages:\n  - \"packages/*\"\n").unwrap();
+    for name in ["a", "b"] {
+        fs::create_dir_all(root.join("packages").join(name)).unwrap();
+    }
+    fs::write(root.join("packages/a/package.json"), r#"{"name":"a","version":"1.0.0"}"#).unwrap();
+    fs::write(
+        root.join("packages/b/package.json"),
+        r#"{"name":"b","version":"1.0.0","dependencies":{"a":"workspace:*"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("packages/a/project.json"),
+        r#"{"targets":{"build":{"command":"mkdir -p dist && echo a > dist/out","outputs":["dist/**"]}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("packages/b/project.json"),
+        r#"{"targets":{"build":{"command":"mkdir -p dist && cat ../a/dist/out > dist/out","outputs":["dist/**"],"dependsOn":["^build"]}}}"#,
+    )
+    .unwrap();
+    git(root, &["init", "-q"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "-q", "-m", "initial"]);
+    fs::write(root.join("packages/b/index.js"), "changed").unwrap();
+
+    Mono::cargo_bin("mono")
+        .unwrap()
+        .current_dir(root)
+        .args(["run", "build", "--affected"])
+        .assert()
+        .success()
+        .stdout(contains("a:build"))
+        .stdout(contains("b:build"));
+    assert_eq!(fs::read_to_string(root.join("packages/b/dist/out")).unwrap().trim(), "a");
+}

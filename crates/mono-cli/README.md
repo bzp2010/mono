@@ -5,7 +5,7 @@ The `mono` binary. It parses arguments, finds the workspace, and calls the libra
 ## Subcommands
 
 - `mono run <target>`: runs the target across the graph. Prints `<project>:<target>: ok` or `: cached` for each executed task.
-- `mono run <target> --affected [--base <rev>]`: runs the target only in projects affected by changes, which are the changed projects and the projects that depend on them. Changes are measured against `<rev>`, which defaults to `HEAD`, so uncommitted changes count. In CI, pass the base branch as `--base`.
+- `mono run <target> --affected [--base <rev>]`: runs the target only in projects affected by changes, which are the changed projects and the projects that depend on them. The dependencies of the affected tasks are planned too, since their outputs and cache keys are inputs of the affected tasks. Changes are measured against `<rev>`, which defaults to `HEAD`, so uncommitted changes count. In CI, pass the base branch as `--base`.
 - `mono graph`: prints one line per project in dependency order, as `name` or `name -> dep1, dep2`.
 - `mono --version`.
 

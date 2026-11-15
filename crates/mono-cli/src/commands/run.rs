@@ -3,7 +3,9 @@
 use std::env;
 
 use mono_cache::LocalBackend;
-use mono_graph::{affected, plan};
+use std::collections::BTreeSet;
+
+use mono_graph::{affected, plan, task_dependencies, TaskId};
 use mono_task::{run_plan, TaskOutcome};
 
 use crate::context::{find_workspace_root, load_workspace, CliError};
@@ -22,7 +24,20 @@ pub fn run(target: &str, base: Option<&str>) -> Result<i32, CliError> {
     if let Some(base) = base {
         let changed = mono_vcs_git::changed_files(&root, base)?;
         let affected = affected(&workspace.graph, &changed);
-        tasks.retain(|task| affected.contains(&task.project));
+        // The affected tasks and every task they depend on. A dependency's output is
+        // an input of the affected task, and its cache key is part of that key. An
+        // unaffected dependency normally hits the cache and costs nothing.
+        let mut needed: BTreeSet<TaskId> =
+            tasks.iter().filter(|t| affected.contains(&t.project)).cloned().collect();
+        let mut pending: Vec<TaskId> = needed.iter().cloned().collect();
+        while let Some(task) = pending.pop() {
+            for dep in task_dependencies(&workspace.graph, &task)? {
+                if needed.insert(dep.clone()) {
+                    pending.push(dep);
+                }
+            }
+        }
+        tasks.retain(|task| needed.contains(task));
     }
     let cache = LocalBackend::new(root.join(CACHE_DIR));
     let results = run_plan(&workspace.graph, &tasks, Some(&cache))?;
