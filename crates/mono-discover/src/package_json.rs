@@ -1,6 +1,6 @@
 //! Shared helpers for Node.js workspaces: manifests and member expansion.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -53,32 +53,52 @@ pub(crate) fn read_package_json(dir: &Path) -> Result<PackageJson, DiscoverError
 
 /// Expands workspace glob patterns into member directories.
 ///
-/// Every matched directory must contain a `package.json`, otherwise the
-/// result is `MissingManifest`.
+/// Patterns starting with `!` exclude directories from the inclusion patterns,
+/// as pnpm does. Exclusions are applied before validation, so an excluded
+/// directory never needs a manifest. Every remaining matched directory must
+/// contain a `package.json`, otherwise the result is `MissingManifest`.
 pub(crate) fn expand_members(root: &Path, patterns: &[String]) -> Result<Vec<PathBuf>, DiscoverError> {
+    let (excludes, includes): (Vec<&String>, Vec<&String>) =
+        patterns.iter().partition(|p| p.starts_with('!'));
+    let mut excluded = BTreeSet::new();
+    for pattern in excludes {
+        excluded.extend(glob_dirs(root, &pattern[1..])?);
+    }
     let mut dirs = Vec::new();
-    for pattern in patterns {
-        // The root is escaped so that metacharacters in its path match literally.
-        let escaped_root = glob::Pattern::escape(&root.to_string_lossy());
-        let full = PathBuf::from(escaped_root).join(pattern);
-        let entries = glob::glob(&full.to_string_lossy()).map_err(|e| {
-            DiscoverError::InvalidPattern { pattern: pattern.clone(), message: e.to_string() }
-        })?;
-        for entry in entries {
-            let path = entry.map_err(|e| DiscoverError::Io {
-                path: e.path().to_path_buf(),
-                source: e.into(),
-            })?;
-            if !path.is_dir() {
+    for pattern in includes {
+        for dir in glob_dirs(root, pattern)? {
+            if excluded.contains(&dir) {
                 continue;
             }
-            if !path.join("package.json").is_file() {
-                return Err(DiscoverError::MissingManifest { dir: path });
+            if !dir.join("package.json").is_file() {
+                return Err(DiscoverError::MissingManifest { dir });
             }
-            dirs.push(path);
+            dirs.push(dir);
         }
     }
     dirs.sort();
     dirs.dedup();
+    Ok(dirs)
+}
+
+/// Directories matched by one glob pattern, relative to `root`.
+fn glob_dirs(root: &Path, pattern: &str) -> Result<Vec<PathBuf>, DiscoverError> {
+    // The root is escaped so that metacharacters in its path match literally.
+    let escaped_root = glob::Pattern::escape(&root.to_string_lossy());
+    let full = PathBuf::from(escaped_root).join(pattern);
+    let entries = glob::glob(&full.to_string_lossy()).map_err(|e| DiscoverError::InvalidPattern {
+        pattern: pattern.to_string(),
+        message: e.to_string(),
+    })?;
+    let mut dirs = Vec::new();
+    for entry in entries {
+        let path = entry.map_err(|e| DiscoverError::Io {
+            path: e.path().to_path_buf(),
+            source: e.into(),
+        })?;
+        if path.is_dir() {
+            dirs.push(path);
+        }
+    }
     Ok(dirs)
 }

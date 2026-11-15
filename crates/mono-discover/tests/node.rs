@@ -52,3 +52,11 @@ fn glob_metacharacters_in_workspace_root_do_not_hide_members() {
     let projects = discover(&root, &[Ecosystem::Pnpm]).unwrap();
     assert_eq!(projects.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["x"]);
 }
+
+#[test]
+fn pnpm_negative_pattern_removes_members_before_validation() {
+    // packages/ignored has no package.json, but it is excluded, so it must
+    // neither be a member nor make discovery fail.
+    let projects = discover(&fixture("pnpm-exclude"), &[Ecosystem::Pnpm]).unwrap();
+    assert_eq!(projects.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["x"]);
+}
