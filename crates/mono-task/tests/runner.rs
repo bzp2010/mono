@@ -23,13 +23,15 @@ fn graph_in(root: &Path, a_cmd: &str, b_cmd: &str) -> ProjectGraph {
     fs::create_dir_all(&dir_b).unwrap();
     let discovered = vec![
         DiscoveredProject {
-            name: "a".into(),
+            name: Some("a".into()),
+            package_name: None,
             root: dir_a,
             ecosystem: Ecosystem::Npm,
             dependencies: vec![],
         },
         DiscoveredProject {
-            name: "b".into(),
+            name: Some("b".into()),
+            package_name: None,
             root: dir_b,
             ecosystem: Ecosystem::Npm,
             dependencies: vec!["a".into()],

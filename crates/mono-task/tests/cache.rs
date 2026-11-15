@@ -13,7 +13,8 @@ fn graph_with_output(root: &Path) -> ProjectGraph {
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(dir.join("src/input.txt"), "v1").unwrap();
     let discovered = vec![DiscoveredProject {
-        name: "a".into(),
+        name: Some("a".into()),
+        package_name: None,
         root: dir.clone(),
         ecosystem: Ecosystem::Npm,
         dependencies: vec![],
@@ -94,7 +95,8 @@ fn restore_leaves_exactly_the_snapshot_outputs() {
         depends_on: vec![],
     };
     let discovered = vec![DiscoveredProject {
-        name: "a".into(),
+        name: Some("a".into()),
+        package_name: None,
         root: dir.clone(),
         ecosystem: Ecosystem::Npm,
         dependencies: vec![],
@@ -140,7 +142,8 @@ fn cache_miss_keeps_existing_outputs() {
         depends_on: vec![],
     };
     let discovered = vec![DiscoveredProject {
-        name: "a".into(),
+        name: Some("a".into()),
+        package_name: None,
         root: dir.clone(),
         ecosystem: Ecosystem::Npm,
         dependencies: vec![],
