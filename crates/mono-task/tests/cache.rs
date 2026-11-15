@@ -75,3 +75,52 @@ fn changed_input_misses_cache() {
     assert_eq!(second[0].1, TaskOutcome::Success);
     assert_eq!(fs::read_to_string(root.path().join("log.txt")).unwrap(), "run\nrun\n");
 }
+
+#[test]
+fn restore_leaves_exactly_the_snapshot_outputs() {
+    // Version 1 produces dist/a.js, version 2 produces dist/b.js. Switching
+    // back to version 1 must restore dist/a.js without leaving dist/b.js behind.
+    let root = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let backend = LocalBackend::new(store.path().to_path_buf());
+    let dir = root.path().join("a");
+    fs::create_dir_all(&dir).unwrap();
+    let command = "case $(cat version.txt) in \
+        1) rm -rf dist && mkdir dist && echo a > dist/a.js ;; \
+        2) rm -rf dist && mkdir dist && echo b > dist/b.js ;; esac";
+    let target = TargetConfig {
+        command: command.into(),
+        inputs: vec!["version.txt".into()],
+        outputs: vec!["dist/**".into()],
+        depends_on: vec![],
+        cache_dirs: vec![],
+    };
+    let discovered = vec![DiscoveredProject {
+        name: "a".into(),
+        root: dir.clone(),
+        ecosystem: Ecosystem::Npm,
+        dependencies: vec![],
+    }];
+    let configs: BTreeMap<_, _> = [(
+        "a".to_string(),
+        ProjectConfig {
+            targets: [("build".to_string(), target)].into_iter().collect(),
+            ..Default::default()
+        },
+    )]
+    .into_iter()
+    .collect();
+    let graph = build(discovered, &configs).unwrap();
+    let tasks = plan(&graph, "build").unwrap();
+
+    fs::write(dir.join("version.txt"), "1").unwrap();
+    run_plan(&graph, &tasks, Some(&backend)).unwrap();
+    fs::write(dir.join("version.txt"), "2").unwrap();
+    run_plan(&graph, &tasks, Some(&backend)).unwrap();
+    fs::write(dir.join("version.txt"), "1").unwrap();
+    let back = run_plan(&graph, &tasks, Some(&backend)).unwrap();
+
+    assert_eq!(back[0].1, TaskOutcome::Cached);
+    assert!(dir.join("dist/a.js").exists());
+    assert!(!dir.join("dist/b.js").exists(), "output from the other version must be removed");
+}

@@ -1,7 +1,8 @@
 //! Runs target commands in project directories, with optional output caching.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use mono_cache::{dir_key, expand_files, output_digest, task_key, CacheBackend, CacheError};
@@ -36,6 +37,12 @@ pub enum RunError {
     Graph(#[from] GraphError),
     #[error(transparent)]
     Cache(#[from] CacheError),
+    #[error("I/O error at {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Runs `command` through `sh -c` with `root` as the working directory.
@@ -82,6 +89,15 @@ pub fn run_plan(
         let key = task_key(task, config, root, &dep_contributions)?;
         let cacheable = cache.is_some() && !config.outputs.is_empty();
 
+        if cacheable {
+            // Remove outputs left by an earlier version, so a restored snapshot
+            // is the complete output set and nothing else.
+            for rel in expand_files(root, &config.outputs)? {
+                let path = root.join(&rel);
+                fs::remove_file(&path)
+                    .map_err(|source| RunError::Io { path: path.clone(), source })?;
+            }
+        }
         let outcome = match cache {
             Some(backend) if cacheable && backend.get(&key, root)? => TaskOutcome::Cached,
             _ => {
