@@ -79,8 +79,8 @@ fn outputs_reached_through_a_linked_directory_are_not_removed() {
 
 #[test]
 fn restoring_a_link_never_writes_through_it() {
-    // The snapshot holds a link to outside and a file beneath the same name. The
-    // restore must replace the link with a directory, not write into the outside.
+    // The snapshot holds a link to outside. The destination holds a link at the same
+    // name. The restore must replace that link, and must not write into the outside.
     let l = layout();
     let source = l.project.join("source");
     fs::create_dir_all(&source).unwrap();
@@ -113,4 +113,88 @@ fn storing_a_tree_that_begins_at_a_link_is_refused() {
     let backend = LocalBackend::new(l.store.path().to_path_buf());
     assert!(backend.put_dir("k", &l.project, Path::new("node_modules")).is_err());
     assert!(outside_unchanged(&l));
+}
+
+#[test]
+fn restore_replaces_a_linked_ancestor_with_a_directory() {
+    // cacheDirs `a/b` where `a` is a link to outside. The restore must replace the
+    // link with a real directory, not fail and not remove the outside directory.
+    let l = layout();
+    let source = l.project.join("src");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("file.txt"), "from snapshot").unwrap();
+    let backend = LocalBackend::new(l.store.path().to_path_buf());
+    backend.put_dir("ka", &l.project, Path::new("src")).unwrap();
+
+    std::os::unix::fs::symlink(&l.outside, l.project.join("a")).unwrap();
+    assert!(backend.get_dir("ka", &l.project, Path::new("a/b")).unwrap());
+    assert!(!fs::symlink_metadata(l.project.join("a")).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read_to_string(l.project.join("a/b/file.txt")).unwrap(), "from snapshot");
+    assert!(outside_unchanged(&l));
+}
+
+#[test]
+fn storing_an_output_that_passes_through_a_link_fails_at_store_time() {
+    // `dist` links to `build` inside the project. Removal would refuse this path, so
+    // storing it must refuse too, instead of creating an entry that breaks later.
+    let l = layout();
+    fs::create_dir_all(l.project.join("build")).unwrap();
+    fs::write(l.project.join("build/a.js"), "x").unwrap();
+    std::os::unix::fs::symlink(l.project.join("build"), l.project.join("dist")).unwrap();
+    let backend = LocalBackend::new(l.store.path().to_path_buf());
+    let rel = vec![PathBuf::from("dist/a.js")];
+    assert!(backend.put("kb", &l.project, &rel).is_err());
+    assert!(!backend.contains("kb").unwrap());
+}
+
+#[test]
+fn cache_dirs_are_validated_before_a_miss_returns() {
+    let l = layout();
+    let backend = LocalBackend::new(l.store.path().to_path_buf());
+    assert!(backend.get_dir("never", &l.project, Path::new("../outside")).is_err());
+    assert!(backend.get_dir("never", &l.project, Path::new("/etc")).is_err());
+    assert!(backend.get_dir("never", &l.project, Path::new("")).is_err());
+    assert!(backend.get_dir("never", &l.project, Path::new(".")).is_err());
+}
+
+#[test]
+fn keys_must_be_plain_names() {
+    let l = layout();
+    let backend = LocalBackend::new(l.store.path().to_path_buf());
+    assert!(backend.contains("/etc").is_err());
+    assert!(backend.contains("../x").is_err());
+}
+
+#[test]
+fn walking_a_file_is_reported_as_not_a_directory() {
+    let l = layout();
+    fs::write(l.project.join("plain.txt"), "x").unwrap();
+    let backend = LocalBackend::new(l.store.path().to_path_buf());
+    let err = backend.put_dir("kc", &l.project, Path::new("plain.txt")).unwrap_err();
+    assert!(matches!(err, mono_cache::CacheError::NotADirectory { .. }), "{err}");
+}
+
+#[test]
+fn removing_an_output_through_a_link_inside_the_project_is_refused() {
+    // `dist` links to `build` inside the project. Expansion accepts the file, but
+    // removal must still refuse to traverse the link.
+    let l = layout();
+    fs::create_dir_all(l.project.join("build")).unwrap();
+    fs::write(l.project.join("build/a.js"), "x").unwrap();
+    std::os::unix::fs::symlink(l.project.join("build"), l.project.join("dist")).unwrap();
+    assert!(remove_matching(&l.project, &["dist/a.js".into()]).is_err());
+    assert!(l.project.join("build/a.js").exists());
+}
+
+#[test]
+fn empty_directories_survive_a_round_trip() {
+    let l = layout();
+    let tree = l.project.join("tree");
+    fs::create_dir_all(tree.join("empty/nested")).unwrap();
+    fs::write(tree.join("file.txt"), "x").unwrap();
+    let backend = LocalBackend::new(l.store.path().to_path_buf());
+    backend.put_dir("kd", &l.project, Path::new("tree")).unwrap();
+    fs::remove_dir_all(&tree).unwrap();
+    assert!(backend.get_dir("kd", &l.project, Path::new("tree")).unwrap());
+    assert!(tree.join("empty/nested").is_dir());
 }

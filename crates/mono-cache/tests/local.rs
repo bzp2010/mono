@@ -46,29 +46,17 @@ fn failed_put_leaves_no_entry() {
 
 #[test]
 fn failed_put_dir_leaves_no_entry() {
-    use std::os::unix::fs::PermissionsExt;
+    // A named pipe cannot be cached. The walk fails part way, so no entry may appear.
     let project = tempfile::tempdir().unwrap();
     let store = tempfile::tempdir().unwrap();
     let target = project.path().join("target");
     fs::create_dir_all(&target).unwrap();
     fs::write(target.join("a.bin"), "x").unwrap();
-    let locked = target.join("b.bin");
-    fs::write(&locked, "y").unwrap();
-    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    let fifo = target.join("pipe");
+    let status = std::process::Command::new("mkfifo").arg(&fifo).status().unwrap();
+    assert!(status.success());
 
     let backend = LocalBackend::new(store.path().to_path_buf());
-    let result = backend.put_dir("k3", project.path(), Path::new("target"));
-    fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
-
-    if running_as_root() {
-        return; // root can read mode 000 files, so the failure cannot be produced
-    }
-    assert!(result.is_err());
-    assert!(!backend.get_dir("k3", project.path(), Path::new("restored")).unwrap());
-}
-
-fn running_as_root() -> bool {
-    fs::read_to_string("/proc/self/status")
-        .map(|s| s.lines().any(|l| l.starts_with("Uid:") && l.split_whitespace().nth(1) == Some("0")))
-        .unwrap_or(false)
+    assert!(backend.put_dir("k3", project.path(), Path::new("target")).is_err());
+    assert!(!backend.contains("k3").unwrap());
 }
