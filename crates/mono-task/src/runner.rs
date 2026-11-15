@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use mono_cache::{
-    dir_key, expand_files, output_digest, remove_matching, task_key, CacheBackend, CacheError,
+    dir_key, expand_files, output_digest, remove_stale, task_key, CacheBackend, CacheError,
 };
 use mono_graph::{task_dependencies, GraphError, ProjectGraph, TaskId};
 use thiserror::Error;
@@ -87,10 +87,16 @@ pub fn run_plan(
         // A hit replaces the outputs with the snapshot, so outputs from another
         // version are removed first. A miss leaves them alone, because the
         // command may be incremental and rely on them.
+        // A hit restores the snapshot first, then removes the outputs that are not
+        // part of it. A failed restore therefore never leaves the outputs half removed.
         let cached = match cache {
             Some(backend) if cacheable && backend.contains(&key)? => {
-                remove_matching(root, &config.outputs)?;
-                backend.get(&key, root)?
+                let restored = backend.get(&key, root)?;
+                if restored {
+                    let keep = backend.stored_files(&key)?;
+                    remove_stale(root, &config.outputs, &keep)?;
+                }
+                restored
             }
             _ => false,
         };

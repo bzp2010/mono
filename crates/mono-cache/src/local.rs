@@ -1,12 +1,13 @@
 //! Local directory backend: each key is a directory of stored files.
 //!
-//! Entries are built in a private staging directory and renamed into place, so a
-//! reader sees either no entry or a complete one.
+//! An entry is built in a private staging directory and renamed into place. The
+//! first complete entry for a key wins, and a published entry is never replaced,
+//! so a reader sees either no entry or a complete one.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::confine::{EntryKind, Tree};
+use crate::confine::{check_dir_name, EntryKind, Tree};
 use crate::{CacheBackend, CacheError};
 
 /// Stores entries under `dir/<key>/`, preserving relative paths.
@@ -19,31 +20,47 @@ impl LocalBackend {
         Self { dir }
     }
 
-    fn entry_dir(&self, key: &str) -> PathBuf {
-        self.dir.join(key)
+    /// The directory of one entry. A key is a plain name, so it cannot point
+    /// outside the cache directory.
+    fn entry_dir(&self, key: &str) -> Result<PathBuf, CacheError> {
+        let plain = !key.is_empty()
+            && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if !plain {
+            return Err(CacheError::InvalidKey { key: key.to_string() });
+        }
+        Ok(self.dir.join(key))
     }
 
     /// Builds an entry in a staging directory, then renames it into place. A failed
-    /// build removes its staging directory and leaves no entry behind.
+    /// build leaves no entry. When the entry already exists, the staged build is
+    /// discarded, because the same key always names the same content.
     fn publish(
         &self,
         key: &str,
         build: impl FnOnce(&Path) -> Result<(), CacheError>,
     ) -> Result<(), CacheError> {
+        let dst = self.entry_dir(key)?;
         fs::create_dir_all(&self.dir)
             .map_err(|source| CacheError::Io { path: self.dir.clone(), source })?;
         let staging = tempfile::TempDir::new_in(&self.dir)
             .map_err(|source| CacheError::Io { path: self.dir.clone(), source })?;
         build(staging.path())?;
-        let dst = self.entry_dir(key);
-        if dst.exists() {
-            fs::remove_dir_all(&dst).map_err(|source| CacheError::Io { path: dst.clone(), source })?;
+        if dst.is_dir() {
+            return Ok(());
         }
         let staged = staging.keep();
-        fs::rename(&staged, &dst).map_err(|source| {
-            let _ = fs::remove_dir_all(&staged);
-            CacheError::Io { path: dst.clone(), source }
-        })
+        match fs::rename(&staged, &dst) {
+            Ok(()) => Ok(()),
+            // Another writer published the same key first.
+            Err(_) if dst.is_dir() => {
+                let _ = fs::remove_dir_all(&staged);
+                Ok(())
+            }
+            Err(source) => {
+                let _ = fs::remove_dir_all(&staged);
+                Err(CacheError::Io { path: dst, source })
+            }
+        }
     }
 
     /// Restores the entries of a stored tree into `dest` under `prefix`.
@@ -63,11 +80,24 @@ impl LocalBackend {
 
 impl CacheBackend for LocalBackend {
     fn contains(&self, key: &str) -> Result<bool, CacheError> {
-        Ok(self.entry_dir(key).is_dir())
+        Ok(self.entry_dir(key)?.is_dir())
+    }
+
+    fn stored_files(&self, key: &str) -> Result<Vec<PathBuf>, CacheError> {
+        let store = self.entry_dir(key)?;
+        if !store.is_dir() {
+            return Ok(Vec::new());
+        }
+        Ok(Tree::new(&store)
+            .walk(Path::new(""))?
+            .into_iter()
+            .filter(|(_, kind)| *kind == EntryKind::File)
+            .map(|(rel, _)| rel)
+            .collect())
     }
 
     fn get(&self, key: &str, project_root: &Path) -> Result<bool, CacheError> {
-        let store = self.entry_dir(key);
+        let store = self.entry_dir(key)?;
         if !store.is_dir() {
             return Ok(false);
         }
@@ -87,7 +117,8 @@ impl CacheBackend for LocalBackend {
     }
 
     fn get_dir(&self, key: &str, project_root: &Path, rel_dir: &Path) -> Result<bool, CacheError> {
-        let store = self.entry_dir(key);
+        check_dir_name(rel_dir)?;
+        let store = self.entry_dir(key)?;
         if !store.is_dir() {
             return Ok(false);
         }
@@ -98,6 +129,7 @@ impl CacheBackend for LocalBackend {
     }
 
     fn put_dir(&self, key: &str, project_root: &Path, rel_dir: &Path) -> Result<(), CacheError> {
+        check_dir_name(rel_dir)?;
         let project = Tree::new(project_root);
         let entries = project.walk(rel_dir)?;
         if entries.is_empty() {

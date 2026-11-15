@@ -25,6 +25,19 @@ pub fn remove_matching(root: &Path, patterns: &[String]) -> Result<(), CacheErro
     Ok(())
 }
 
+/// Removes the files that the patterns match under `root` but that are not in
+/// `keep`. Used after a snapshot is restored, so that only outputs left by
+/// another version disappear.
+pub fn remove_stale(root: &Path, patterns: &[String], keep: &[PathBuf]) -> Result<(), CacheError> {
+    let tree = Tree::new(root);
+    for rel in tree.expand(patterns)? {
+        if !keep.contains(&rel) {
+            tree.remove_file(&rel)?;
+        }
+    }
+    Ok(())
+}
+
 /// Computes the cache key of a task.
 ///
 /// The key covers the task identity, the command, the declared output patterns,

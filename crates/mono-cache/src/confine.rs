@@ -92,6 +92,7 @@ impl Tree {
     /// The path of a file inside the tree, to copy from.
     pub(crate) fn source(&self, rel: &Path) -> Result<PathBuf, CacheError> {
         check_relative_path(rel)?;
+        self.check_ancestors(rel)?;
         self.check_resolves_inside(rel)?;
         Ok(self.root.join(rel))
     }
@@ -133,8 +134,9 @@ impl Tree {
         let dst = self.root.join(rel);
         match fs::symlink_metadata(&dst) {
             Ok(meta) if meta.is_dir() => Ok(()),
+            // A failed removal surfaces from create_dir below, so it is not reported here.
             Ok(_) => {
-                fs::remove_file(&dst).map_err(|source| CacheError::Io { path: dst.clone(), source })?;
+                let _ = fs::remove_file(&dst);
                 create_dir(&dst)
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => create_dir(&dst),
@@ -154,8 +156,11 @@ impl Tree {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(source) => return Err(CacheError::Io { path: base, source }),
         };
-        if !meta.is_dir() {
+        if meta.file_type().is_symlink() {
             return Err(CacheError::ThroughLink { path: base });
+        }
+        if !meta.is_dir() {
+            return Err(CacheError::NotADirectory { path: base });
         }
         let mut out = vec![(PathBuf::new(), EntryKind::Dir)];
         for entry in WalkDir::new(&base).follow_links(false).min_depth(1) {
@@ -180,7 +185,7 @@ impl Tree {
             } else if kind.is_file() {
                 EntryKind::File
             } else {
-                continue;
+                return Err(CacheError::UnsupportedFile { path: entry.path().to_path_buf() });
             };
             out.push((rel, kind));
         }
@@ -198,8 +203,12 @@ impl Tree {
             current.push(component);
             match fs::symlink_metadata(&current) {
                 Ok(meta) if meta.is_dir() => {}
-                Ok(_) => fs::remove_file(&current)
-                    .map_err(|source| CacheError::Io { path: current.clone(), source })?,
+                // A link or file in an ancestor position is replaced by a directory.
+                // A failed removal surfaces from create_dir, which then fails.
+                Ok(_) => {
+                    let _ = fs::remove_file(&current);
+                    create_dir(&current)?;
+                }
                 Err(e) if e.kind() == io::ErrorKind::NotFound => create_dir(&current)?,
                 Err(source) => return Err(CacheError::Io { path: current.clone(), source }),
             }
@@ -271,10 +280,24 @@ fn create_dir(path: &Path) -> Result<(), CacheError> {
 /// `symlink_metadata` is used, so a link to a directory is never followed.
 fn clear_real_directory(dst: &Path) -> Result<(), CacheError> {
     match fs::symlink_metadata(dst) {
-        Ok(meta) if meta.is_dir() => {
-            fs::remove_dir_all(dst).map_err(|source| CacheError::Io { path: dst.to_path_buf(), source })
-        }
+        Ok(meta) if meta.is_dir() => match fs::remove_dir_all(dst) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(CacheError::Io { path: dst.to_path_buf(), source }),
+        },
         _ => Ok(()),
+    }
+}
+
+/// Cache directory names must be non-empty and made of normal components only,
+/// so `""`, `.`, `..`, and absolute paths are rejected before any work is done.
+pub(crate) fn check_dir_name(rel: &Path) -> Result<(), CacheError> {
+    let plain = rel.components().next().is_some()
+        && rel.components().all(|c| matches!(c, Component::Normal(_)));
+    if plain {
+        Ok(())
+    } else {
+        Err(CacheError::OutsideProject { pattern: rel.display().to_string() })
     }
 }
 
