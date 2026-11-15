@@ -36,6 +36,9 @@ pub fn expand_files(root: &Path, patterns: &[String]) -> Result<Vec<PathBuf>, Ca
             })?;
             if path.is_file() {
                 let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+                // Patterns such as `.[.]` match `..` without containing it literally,
+                // so each expanded path is checked as well.
+                check_relative(&rel.to_string_lossy())?;
                 out.push(rel);
             }
         }

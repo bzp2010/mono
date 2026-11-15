@@ -103,3 +103,16 @@ fn patterns_escaping_the_project_root_are_rejected() {
     assert!(mono_cache::expand_files(dir.path(), &["../shared/**".to_string()]).is_err());
     assert!(mono_cache::expand_files(dir.path(), &["/etc/*".to_string()]).is_err());
 }
+
+#[test]
+fn glob_that_expands_outside_the_root_is_rejected() {
+    // `.[.]` is a character class that matches `..`, so the literal pattern looks
+    // relative while its matches leave the project root.
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("proj");
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(base.path().join("shared")).unwrap();
+    fs::write(base.path().join("shared/a.txt"), "x").unwrap();
+    let result = mono_cache::expand_files(&root, &[".[.]/shared/*.txt".to_string()]);
+    assert!(result.is_err());
+}
