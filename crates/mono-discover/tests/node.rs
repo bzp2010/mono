@@ -60,3 +60,13 @@ fn pnpm_negative_pattern_removes_members_before_validation() {
     let projects = discover(&fixture("pnpm-exclude"), &[Ecosystem::Pnpm]).unwrap();
     assert_eq!(projects.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["x"]);
 }
+
+#[test]
+fn pnpm_root_package_is_a_project_too() {
+    // Every pnpm package, the root one included, is a project of its own.
+    let projects = discover(&fixture("pnpm-root"), &[Ecosystem::Pnpm]).unwrap();
+    let root = find(&projects, "root-pkg");
+    assert_eq!(projects.len(), 2);
+    assert_eq!(root.dependencies, vec!["x".to_string()]);
+    assert!(find(&projects, "x").dependencies.is_empty());
+}

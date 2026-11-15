@@ -1,12 +1,12 @@
 //! pnpm workspace discovery from `pnpm-workspace.yaml`.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use mono_core::{DiscoveredProject, Ecosystem};
 use serde::Deserialize;
 
-use crate::package_json::{expand_members, read_package_json};
+use crate::package_json::{expand_members, read_package_json, PackageJson};
 use crate::DiscoverError;
 
 #[derive(Debug, Deserialize)]
@@ -15,8 +15,10 @@ struct PnpmWorkspace {
     packages: Vec<String>,
 }
 
-/// Discovers pnpm workspace members. A dependency is an edge only when its
-/// spec uses the `workspace:` protocol and names another member.
+/// Discovers pnpm packages: the root package (when the root has a
+/// `package.json`) and every member. Each is a project of its own. A
+/// dependency is an edge only when its spec uses the `workspace:` protocol and
+/// names another package.
 pub fn discover_pnpm(root: &Path) -> Result<Vec<DiscoveredProject>, DiscoverError> {
     let path = root.join("pnpm-workspace.yaml");
     let text = std::fs::read_to_string(&path)
@@ -25,25 +27,45 @@ pub fn discover_pnpm(root: &Path) -> Result<Vec<DiscoveredProject>, DiscoverErro
         DiscoverError::InvalidManifest { path: path.clone(), message: e.to_string() }
     })?;
 
-    let members: Vec<_> = expand_members(root, &ws.packages)?
-        .into_iter()
-        .map(|dir| read_package_json(&dir).map(|pkg| (dir, pkg)))
-        .collect::<Result<_, _>>()?;
-    let names: BTreeSet<String> = members.iter().filter_map(|(_, p)| p.name.clone()).collect();
+    let mut packages: Vec<(PathBuf, PackageJson)> = Vec::new();
+    if root.join("package.json").is_file() {
+        packages.push((root.to_path_buf(), read_package_json(root)?));
+    }
+    for dir in expand_members(root, &ws.packages)? {
+        if dir == root {
+            continue;
+        }
+        packages.push((dir.clone(), read_package_json(&dir)?));
+    }
+
+    let mut named = Vec::new();
+    for (dir, pkg) in packages {
+        let name = match pkg.name.clone() {
+            Some(name) => name,
+            None if dir == root => dir
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            None => {
+                return Err(DiscoverError::InvalidManifest {
+                    path: dir.join("package.json"),
+                    message: "missing \"name\"".to_string(),
+                })
+            }
+        };
+        named.push((dir, name, pkg));
+    }
+    let names: BTreeSet<String> = named.iter().map(|(_, n, _)| n.clone()).collect();
 
     let mut projects = Vec::new();
-    for (dir, pkg) in &members {
-        let name = pkg.name.clone().ok_or_else(|| DiscoverError::InvalidManifest {
-            path: dir.join("package.json"),
-            message: "missing \"name\"".to_string(),
-        })?;
+    for (dir, name, pkg) in &named {
         let dependencies = pkg
             .all_dependencies()
             .filter(|(dep, spec)| spec.starts_with("workspace:") && names.contains(*dep))
             .map(|(dep, _)| dep.clone())
             .collect();
         projects.push(DiscoveredProject {
-            name,
+            name: name.clone(),
             root: dir.clone(),
             ecosystem: Ecosystem::Pnpm,
             dependencies,
