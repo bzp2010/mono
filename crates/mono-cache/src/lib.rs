@@ -13,7 +13,7 @@ mod confine;
 mod key;
 mod local;
 
-pub use key::{expand_files, output_digest, remove_matching, remove_stale, task_key};
+pub use key::{expand_files, files_digest, output_digest, remove_matching, remove_stale, task_key};
 pub use local::LocalBackend;
 
 /// Errors raised by cache keys and backends.

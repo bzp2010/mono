@@ -1,5 +1,6 @@
 //! Cache keys and digests over declared inputs and outputs.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use mono_core::TargetConfig;
@@ -67,6 +68,21 @@ pub fn task_key(
     }
     for dep in dep_contributions {
         feed(&mut h, "dependency", dep.as_bytes());
+    }
+    Ok(hex(&h.finalize()))
+}
+
+/// Digest over the names and contents of the given files. A file that does not
+/// exist contributes its name and a marker, so creating it changes the digest.
+pub fn files_digest(paths: &[PathBuf]) -> Result<String, CacheError> {
+    let mut h = Sha256::new();
+    for path in paths {
+        feed(&mut h, "file-name", path.to_string_lossy().as_bytes());
+        match fs::read(path) {
+            Ok(content) => feed(&mut h, "file-content", &Sha256::digest(&content)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => feed(&mut h, "file-absent", b""),
+            Err(source) => return Err(CacheError::Io { path: path.clone(), source }),
+        }
     }
     Ok(hex(&h.finalize()))
 }

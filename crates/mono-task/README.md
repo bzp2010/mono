@@ -13,5 +13,6 @@ Runs target commands and combines execution with the cache.
 - On a cache hit, every file matching the target's outputs is removed before the snapshot is restored, so the restored set is the complete output set. On a miss, existing outputs are left alone, because the command may be incremental and rely on them.
 - A task with `outputs` is skipped on a cache hit. A task without outputs always runs its command. Tools that keep their own incremental state, such as Cargo's `target/`, are not declared as outputs, so their commands always run and manage their own state.
 - A target without outputs and without a cache backend always runs. Its key still contributes to dependents.
+- `run_plan_in_workspace` also keys every task on the workspace inputs of its ecosystem: its lockfiles, toolchain files, and `mono.json`. Those files lie outside every project and cannot be declared as task inputs. Without this, a changed lockfile would restore outputs built with the old dependencies. `run_plan` leaves them out, for callers without a workspace root.
 - A command killed by a signal is `RunError::Terminated`, not an exit code. The distinction keeps a crash from looking like a normal failure.
 - Commands run sequentially. There is no parallelism yet.

@@ -14,7 +14,7 @@ pub struct MonoConfig {
 }
 
 /// Supported ecosystems. Names are lowercase in `mono.json`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Ecosystem {
     Cargo,

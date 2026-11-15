@@ -17,6 +17,13 @@ enum Command {
     Run {
         /// Target name, for example `build`.
         target: String,
+        /// Run only in projects affected by changes: the changed projects and the
+        /// projects that depend on them.
+        #[arg(long)]
+        affected: bool,
+        /// The revision that changes are measured against, with `--affected`.
+        #[arg(long, default_value = "HEAD", requires = "affected")]
+        base: String,
     },
     /// Print the project graph in dependency order.
     Graph,
@@ -25,7 +32,9 @@ enum Command {
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Run { target } => commands::run::run(&target),
+        Command::Run { target, affected, base } => {
+            commands::run::run(&target, affected.then_some(base.as_str()))
+        }
         Command::Graph => commands::graph::graph(),
     };
     match result {

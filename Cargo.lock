@@ -329,6 +329,7 @@ dependencies = [
  "mono-discover",
  "mono-graph",
  "mono-task",
+ "mono-vcs-git",
  "predicates",
  "tempfile",
  "thiserror",
@@ -374,6 +375,14 @@ dependencies = [
  "mono-cache",
  "mono-core",
  "mono-graph",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "mono-vcs-git"
+version = "0.0.0"
+dependencies = [
  "tempfile",
  "thiserror",
 ]

@@ -22,4 +22,5 @@ mono-core = { path = "../mono-core" }
 mono-discover = { path = "../mono-discover" }
 mono-graph = { path = "../mono-graph" }
 mono-task = { path = "../mono-task" }
+mono-vcs-git = { path = "../mono-vcs-git" }
 thiserror = "2"
