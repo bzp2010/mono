@@ -10,11 +10,14 @@ fn repo_root() -> PathBuf {
 
 #[test]
 fn graph_discovers_this_repository_as_a_project() {
+    // A project is named after its workspace root directory, whatever the checkout is called.
+    let root = repo_root().canonicalize().unwrap();
+    let name = root.file_name().unwrap().to_string_lossy().into_owned();
     Command::cargo_bin("mono")
         .unwrap()
-        .current_dir(repo_root())
+        .current_dir(&root)
         .arg("graph")
         .assert()
         .success()
-        .stdout(contains("monorepo"));
+        .stdout(contains(name));
 }
