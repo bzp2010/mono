@@ -1,0 +1,4 @@
+target/
+.mono/
+.superpowers/
+docs/superpowers/

@@ -1,0 +1,16 @@
+[package]
+name = "mono-discover"
+version = "0.0.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+mono-core = { path = "../mono-core" }
+serde_json = "1"
+thiserror = "2"
+glob = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_yaml_ng = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
