@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use mono_release::{apply_plan, ApplyError, ApplyTarget, Bump, Release};
+use mono_release::{apply_plan, ApplyError, ApplyTarget, Bump, ManifestKind, Release};
 use semver::Version;
 
 fn release(current: &str, next: &str) -> Release {
@@ -13,8 +13,16 @@ fn release(current: &str, next: &str) -> Release {
     }
 }
 
+/// The kind follows the manifests' file name, and is `package.json` when there are none.
 fn target(project: &str, names: &[&str], manifests: &[&Path]) -> ApplyTarget {
+    let cargo = manifests.iter().any(|m| m.file_name().is_some_and(|n| n == "Cargo.toml"));
+    let kind = if cargo { ManifestKind::CargoToml } else { ManifestKind::PackageJson };
+    kind_target(kind, project, names, manifests)
+}
+
+fn kind_target(kind: ManifestKind, project: &str, names: &[&str], manifests: &[&Path]) -> ApplyTarget {
     ApplyTarget {
+        kind,
         project: project.to_string(),
         package_names: names.iter().map(|n| n.to_string()).collect(),
         manifests: manifests.iter().map(|m| m.to_path_buf()).collect(),
@@ -205,7 +213,7 @@ fn a_manifest_listed_under_two_targets_keeps_every_edit() {
     .unwrap();
     apply_plan(
         &plan(&[("a", release("0.1.0", "0.2.0")), ("c", release("1.0.0", "1.1.0"))]),
-        &[target("a", &["a"], &[&root]), target("b", &["b"], &[&root]), target("c", &["c"], &[])],
+        &[target("a", &["a"], &[&root]), target("b", &["b"], &[&root]), kind_target(ManifestKind::CargoToml, "c", &["c"], &[])],
     )
     .unwrap();
     let text = fs::read_to_string(&root).unwrap();
@@ -242,8 +250,8 @@ fn partial_cargo_requirements_follow_the_new_version() {
         ]),
         &[
             target("x", &["x"], &[&a]),
-            target("y", &["y"], &[]),
-            target("z", &["z"], &[]),
+            kind_target(ManifestKind::CargoToml, "y", &["y"], &[]),
+            kind_target(ManifestKind::CargoToml, "z", &["z"], &[]),
         ],
     )
     .unwrap();
@@ -253,4 +261,53 @@ fn partial_cargo_requirements_follow_the_new_version() {
         fs::read_to_string(&a).unwrap(),
         "[package]\nname = \"x\"\nversion = \"0.2.0\"\n\n[dependencies]\nx = \"0.2\"\ny = { path = \"y\", version = \"^2\" }\nz = \"1.3\"\nw = \"0.2\"\n"
     );
+}
+
+#[test]
+fn equal_names_in_different_ecosystems_keep_their_own_releases() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = write_pkg(
+        dir.path(),
+        "app",
+        "{\n  \"name\": \"app\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {\n    \"utils\": \"^1.0.0\"\n  }\n}\n",
+    );
+    let js_utils = write_pkg(dir.path(), "utils", "{\"name\":\"utils\",\"version\":\"1.0.0\"}");
+    let cargo_utils = dir.path().join("Cargo.toml");
+    fs::write(&cargo_utils, "[package]\nname = \"utils\"\nversion = \"1.0.0\"\n").unwrap();
+    apply_plan(
+        &plan(&[
+            ("js-utils", release("1.0.0", "2.0.0")),
+            ("rs-utils", release("1.0.0", "1.1.0")),
+        ]),
+        &[
+            target("app", &["app"], &[&app]),
+            target("js-utils", &["utils"], &[&js_utils]),
+            target("rs-utils", &["utils"], &[&cargo_utils]),
+        ],
+    )
+    .unwrap();
+    assert!(fs::read_to_string(&app).unwrap().contains("\"utils\": \"^2.0.0\""));
+    assert!(fs::read_to_string(&cargo_utils).unwrap().contains("version = \"1.1.0\""));
+}
+
+#[test]
+fn an_inherited_version_needs_the_manifest_that_defines_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let member = dir.path().join("Cargo.toml");
+    fs::write(&member, "[package]\nname = \"m\"\nversion.workspace = true\n").unwrap();
+    let before = fs::read_to_string(&member).unwrap();
+    let err = apply_plan(&plan(&[("ws", release("0.1.0", "0.2.0"))]), &[target("ws", &["m"], &[&member])])
+        .unwrap_err();
+    assert!(matches!(err, ApplyError::MissingVersion { .. }));
+    assert_eq!(fs::read_to_string(&member).unwrap(), before);
+}
+
+#[test]
+fn a_released_cargo_project_with_no_version_in_any_manifest_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("Cargo.toml");
+    fs::write(&root, "[workspace]\nmembers = []\n").unwrap();
+    let err = apply_plan(&plan(&[("ws", release("0.1.0", "0.2.0"))]), &[target("ws", &["m"], &[&root])])
+        .unwrap_err();
+    assert!(matches!(err, ApplyError::MissingVersion { .. }));
 }

@@ -9,15 +9,34 @@ use toml_edit::{DocumentMut, Item, Value as TomlValue};
 
 use crate::plan::Release;
 
+/// The manifest format of a project. Package names are scoped by it, because an npm
+/// package and a Cargo crate can share a name without being the same project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ManifestKind {
+    PackageJson,
+    CargoToml,
+}
+
+impl ManifestKind {
+    fn file_name(self) -> &'static str {
+        match self {
+            ManifestKind::PackageJson => "package.json",
+            ManifestKind::CargoToml => "Cargo.toml",
+        }
+    }
+}
+
 /// The manifests of one project, and the package names other manifests use for it.
 #[derive(Debug, Clone)]
 pub struct ApplyTarget {
+    /// The format of every manifest of the project.
+    pub kind: ManifestKind,
     /// The project name, as keyed in the plan.
     pub project: String,
     /// Names that dependency specs use to refer to the project. A Cargo workspace
     /// lists every member crate here.
     pub package_names: Vec<String>,
-    /// `package.json` or `Cargo.toml` files that belong to the project.
+    /// Manifest files of the project. Each must be named as `kind` says.
     pub manifests: Vec<PathBuf>,
 }
 
@@ -68,12 +87,12 @@ pub fn apply_plan(
             return Err(ApplyError::UnknownProject { project: project.clone() });
         }
     }
-    // Package name -> (old, new) for every released project.
-    let mut renames: BTreeMap<&str, (String, String)> = BTreeMap::new();
+    // (kind, package name) -> (old, new) for every released project.
+    let mut renames: Renames = BTreeMap::new();
     for target in targets {
         if let Some(release) = plan.get(&target.project) {
             for name in &target.package_names {
-                renames.insert(name, (release.current.to_string(), release.next.to_string()));
+                renames.insert((target.kind, name.as_str()), (release.current.to_string(), release.next.to_string()));
             }
         }
     }
@@ -83,23 +102,39 @@ pub fn apply_plan(
     let mut files: BTreeMap<PathBuf, (String, String)> = BTreeMap::new();
     for target in targets {
         let own = plan.get(&target.project).map(|r| r.next.to_string());
+        let mut version_set = false;
         for path in &target.manifests {
+            if path.file_name().and_then(|n| n.to_str()) != Some(target.kind.file_name()) {
+                return Err(ApplyError::UnsupportedManifest { path: path.clone() });
+            }
             let current = match files.get(path) {
                 Some((_, current)) => current.clone(),
                 None => std::fs::read_to_string(path)
                     .map_err(|source| ApplyError::Io { path: path.clone(), source })?,
             };
-            let updated = match path.file_name().and_then(|n| n.to_str()) {
-                Some("package.json") => update_package_json(path, &current, own.as_deref(), &renames)?,
-                Some("Cargo.toml") => update_cargo_toml(path, &current, own.as_deref(), &renames)?,
-                _ => return Err(ApplyError::UnsupportedManifest { path: path.clone() }),
+            let (updated, set) = match target.kind {
+                ManifestKind::PackageJson => {
+                    (update_package_json(path, &current, own.as_deref(), &renames)?, own.is_some())
+                }
+                ManifestKind::CargoToml => {
+                    update_cargo_toml(path, &current, own.as_deref(), &renames)?
+                }
             };
+            version_set |= set;
             match files.get_mut(path) {
                 Some(entry) => entry.1 = updated,
                 None => {
                     files.insert(path.clone(), (current, updated));
                 }
             }
+        }
+        // A project that inherits its version from a manifest outside its target
+        // would be reported as released while keeping the old version.
+        if own.is_some()
+            && !version_set
+            && let Some(path) = target.manifests.first()
+        {
+            return Err(ApplyError::MissingVersion { path: path.clone() });
         }
     }
 
@@ -141,11 +176,13 @@ fn rewrite_spec(spec: &str, old: &str, new: &str) -> Option<String> {
     is_partial.then(|| format!("{prefix}{}", new_parts[..parts.len()].join(".")))
 }
 
+type Renames<'a> = BTreeMap<(ManifestKind, &'a str), (String, String)>;
+
 fn update_package_json(
     path: &Path,
     original: &str,
     own: Option<&str>,
-    renames: &BTreeMap<&str, (String, String)>,
+    renames: &Renames,
 ) -> Result<String, ApplyError> {
     let mut doc: Value = serde_json::from_str(original)
         .map_err(|source| ApplyError::Json { path: path.to_path_buf(), source })?;
@@ -158,7 +195,7 @@ fn update_package_json(
     for section in ["dependencies", "devDependencies", "optionalDependencies"] {
         let Some(deps) = doc.get_mut(section).and_then(Value::as_object_mut) else { continue };
         for (name, spec) in deps.iter_mut() {
-            let (Some((old, new)), Some(text)) = (renames.get(name.as_str()), spec.as_str()) else {
+            let (Some((old, new)), Some(text)) = (renames.get(&(ManifestKind::PackageJson, name.as_str())), spec.as_str()) else {
                 continue;
             };
             if let Some(rewritten) = rewrite_spec(text, old, new) {
@@ -197,32 +234,26 @@ fn render_json(doc: &Value, original: &str) -> Result<String, serde_json::Error>
     Ok(text)
 }
 
+/// Returns the new text, and whether a literal version was set in this manifest.
 fn update_cargo_toml(
     path: &Path,
     original: &str,
     own: Option<&str>,
-    renames: &BTreeMap<&str, (String, String)>,
-) -> Result<String, ApplyError> {
+    renames: &Renames,
+) -> Result<(String, bool), ApplyError> {
     let mut doc: DocumentMut = original
         .parse()
         .map_err(|source| ApplyError::Toml { path: path.to_path_buf(), source })?;
+    let mut version_set = false;
     if let Some(new) = own {
         // A literal package version, or the version the members inherit.
-        let mut set = set_version(doc.get_mut("package"), new);
-        set |= set_version(
+        version_set = set_version(doc.get_mut("package"), new);
+        version_set |= set_version(
             doc.get_mut("workspace")
                 .and_then(Item::as_table_like_mut)
                 .and_then(|w| w.get_mut("package")),
             new,
         );
-        let inherits = doc
-            .get("package")
-            .and_then(|p| p.get("version"))
-            .and_then(|v| v.get("workspace"))
-            .is_some();
-        if !set && !inherits {
-            return Err(ApplyError::MissingVersion { path: path.to_path_buf() });
-        }
     }
 
     let mut tables: Vec<&mut Item> = Vec::new();
@@ -231,7 +262,7 @@ fn update_cargo_toml(
         let Some(deps) = deps.as_table_like_mut() else { continue };
         for (key, entry) in deps.iter_mut() {
             let name = real_name(entry, key.get()).to_string();
-            let Some((old, new)) = renames.get(name.as_str()) else { continue };
+            let Some((old, new)) = renames.get(&(ManifestKind::CargoToml, name.as_str())) else { continue };
             let version = match entry.as_value_mut() {
                 Some(TomlValue::String(_)) => entry.as_value_mut(),
                 _ => entry.as_table_like_mut().and_then(|t| t.get_mut("version")).and_then(Item::as_value_mut),
@@ -243,7 +274,7 @@ fn update_cargo_toml(
             }
         }
     }
-    Ok(doc.to_string())
+    Ok((doc.to_string(), version_set))
 }
 
 /// The crate a dependency entry refers to: its `package` key when renamed.

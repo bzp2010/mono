@@ -4,7 +4,7 @@ mod apply;
 mod plan;
 mod record;
 
-pub use apply::{apply_plan, ApplyError, ApplyTarget};
+pub use apply::{apply_plan, ApplyError, ApplyTarget, ManifestKind};
 pub use plan::{compute_plan, Release};
 pub use record::{parse_record, Bump, ChangeRecord};
 
