@@ -6,6 +6,7 @@ Turns discovered projects and explicit config into a validated graph, and plans 
 
 - `build(discovered, configs)`: resolves each project's name, maps discovered dependencies from package names to project names, merges explicit dependencies, then rejects unnamed projects, duplicate names, unknown dependencies, and cycles. The result is `ProjectGraph`, with a topological order where dependencies come first.
 - `plan(graph, target)`: collects every project that defines the target and expands `dependsOn` into `TaskId`s, dependencies first.
+- `ProjectGraph`: besides lookup and `topo_order`, `deps_of` gives the direct dependencies of a project and `dependents_of` the direct reverse edges, in name order. A `Project` carries its package name and version for display and release planning.
 - `task_dependencies(graph, task)`: the direct task dependencies of one task. The cache uses it to build dependent keys.
 
 ## Pitfalls

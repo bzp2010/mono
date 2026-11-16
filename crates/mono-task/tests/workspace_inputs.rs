@@ -25,6 +25,7 @@ fn graph(ws: &Path) -> ProjectGraph {
             root: ws.join("p1"),
             ecosystem: Ecosystem::Cargo,
             dependencies: vec![],
+            version: None,
         },
         DiscoveredProject {
             name: Some("p2".into()),
@@ -32,6 +33,7 @@ fn graph(ws: &Path) -> ProjectGraph {
             root: ws.join("p2"),
             ecosystem: Ecosystem::Cargo,
             dependencies: vec![],
+            version: None,
         },
     ];
     let mut configs = BTreeMap::new();

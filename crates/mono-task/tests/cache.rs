@@ -18,6 +18,7 @@ fn graph_with_output(root: &Path) -> ProjectGraph {
         root: dir.clone(),
         ecosystem: Ecosystem::Npm,
         dependencies: vec![],
+        version: None,
     }];
     let command = format!(
         "mkdir -p dist && cat src/input.txt > dist/out.txt && echo run >> '{}'",
@@ -100,6 +101,7 @@ fn restore_leaves_exactly_the_snapshot_outputs() {
         root: dir.clone(),
         ecosystem: Ecosystem::Npm,
         dependencies: vec![],
+        version: None,
     }];
     let configs: BTreeMap<_, _> = [(
         "a".to_string(),
@@ -147,6 +149,7 @@ fn cache_miss_keeps_existing_outputs() {
         root: dir.clone(),
         ecosystem: Ecosystem::Npm,
         dependencies: vec![],
+        version: None,
     }];
     let configs: BTreeMap<_, _> = [(
         "a".to_string(),

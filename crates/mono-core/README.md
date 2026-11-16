@@ -12,5 +12,5 @@ Configuration types and the shared project model. Other crates depend on this on
 
 - Missing files are not errors for `project.json` (`load_project_config` returns `None`), but they are errors for `mono.json` (`ConfigError::NotFound`).
 - `dependsOn` strings are stored verbatim. The leading `^` is interpreted in `mono-graph`, not here.
-- Names in `ecosystems` are lowercase on disk and in the serialized form.
+- Names in `ecosystems` are lowercase on disk and in the serialized form. `Ecosystem::as_str` gives the same spelling for output.
 - `project.json` may set `name`. It overrides the name the ecosystem gives, and it is the name other projects use in `dependencies`. An empty name is rejected.

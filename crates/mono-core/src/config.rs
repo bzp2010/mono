@@ -22,6 +22,17 @@ pub enum Ecosystem {
     Npm,
 }
 
+impl Ecosystem {
+    /// The name used for this ecosystem in `mono.json` and in command output.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Ecosystem::Cargo => "cargo",
+            Ecosystem::Pnpm => "pnpm",
+            Ecosystem::Npm => "npm",
+        }
+    }
+}
+
 /// Errors raised while loading configuration.
 #[derive(Debug, Error)]
 pub enum ConfigError {

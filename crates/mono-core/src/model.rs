@@ -17,4 +17,6 @@ pub struct DiscoveredProject {
     pub ecosystem: Ecosystem,
     /// Dependencies inferred from the ecosystem's own workspace signals, as package names.
     pub dependencies: Vec<String>,
+    /// The version the ecosystem declares for the project, if it declares one.
+    pub version: Option<String>,
 }

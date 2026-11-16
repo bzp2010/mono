@@ -126,3 +126,11 @@ fn pnpm_path_workspace_spec_keeps_the_scoped_package_name() {
     let projects = discover(&root, &[Ecosystem::Pnpm]).unwrap();
     assert_eq!(find(&projects, "app").dependencies, vec!["@scope/foo".to_string()]);
 }
+
+#[test]
+fn node_projects_carry_the_version_from_package_json() {
+    let pnpm = discover(&fixture("pnpm-ws"), &[Ecosystem::Pnpm]).unwrap();
+    assert_eq!(find(&pnpm, "x").version.as_deref(), Some("1.0.0"));
+    let npm = discover(&fixture("npm-ws"), &[Ecosystem::Npm]).unwrap();
+    assert_eq!(find(&npm, "two").version.as_deref(), Some("2.0.0"));
+}
