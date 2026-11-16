@@ -1,0 +1,10 @@
+[package]
+name = "mono-release"
+version = "0.0.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+semver = "1"
+serde_yaml_ng = "0.10"
+thiserror = "2"
