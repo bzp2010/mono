@@ -141,3 +141,34 @@ fn a_cargo_project_shows_its_shared_version_and_root() {
     assert_eq!(value["ecosystem"], "cargo");
     assert_eq!(value["root"], ".");
 }
+
+#[test]
+fn a_target_with_only_a_command_shows_none_for_the_other_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    workspace(dir.path());
+    fs::write(
+        dir.path().join("packages/app/project.json"),
+        r#"{"targets":{"serve":{"command":"echo go"}}}"#,
+    )
+    .unwrap();
+    mono(dir.path())
+        .args(["show", "project", "app"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("serve: echo go\n    inputs: (none)\n    outputs: (none)\n    dependsOn: (none)\n"));
+}
+
+#[test]
+fn a_member_outside_the_workspace_shows_its_normalized_absolute_root() {
+    let base = tempfile::tempdir().unwrap();
+    let ws = base.path().join("ws");
+    let shared = base.path().join("shared");
+    fs::create_dir_all(&ws).unwrap();
+    fs::create_dir_all(&shared).unwrap();
+    fs::write(ws.join("mono.json"), r#"{"ecosystems":["pnpm"]}"#).unwrap();
+    fs::write(ws.join("pnpm-workspace.yaml"), "packages:\n  - \"../shared\"\n").unwrap();
+    fs::write(shared.join("package.json"), r#"{"name":"shared","version":"1.0.0"}"#).unwrap();
+    let out = mono(&ws).args(["show", "project", "shared", "--json"]).output().unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["root"], shared.canonicalize().unwrap().display().to_string());
+}

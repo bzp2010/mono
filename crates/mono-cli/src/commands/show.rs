@@ -72,17 +72,13 @@ fn describe(workspace: &Workspace, project: &Project) -> Value {
 }
 
 /// The project root relative to the workspace root, with `.` for the root itself.
-/// Paths are compared as given first and canonicalized second, because the working
-/// directory and the discovered roots can spell the same directory differently.
+/// A project outside the workspace gets its absolute, normalized path. Both paths
+/// are canonicalized first, so a root such as `/ws/../shared` is not mistaken for
+/// a path inside the workspace, and a symlinked workspace root still matches.
 fn relative_root(workspace: &Path, root: &Path) -> String {
-    let rel = root.strip_prefix(workspace).map(Path::to_path_buf).or_else(|_| {
-        let workspace = workspace.canonicalize()?;
-        let root = root.canonicalize()?;
-        root.strip_prefix(&workspace)
-            .map(Path::to_path_buf)
-            .map_err(|_| std::io::Error::other("outside the workspace"))
-    });
-    match rel {
+    let workspace = workspace.canonicalize().unwrap_or_else(|_| workspace.to_path_buf());
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    match root.strip_prefix(&workspace) {
         Ok(rel) if rel.as_os_str().is_empty() => ".".to_string(),
         Ok(rel) => rel.display().to_string(),
         Err(_) => root.display().to_string(),
@@ -106,10 +102,8 @@ fn print_text(view: &Value) {
     println!("targets:");
     for (name, target) in targets {
         println!("  {name}: {}", target["command"].as_str().unwrap_or_default());
-        for (label, key) in [("inputs", "inputs"), ("outputs", "outputs"), ("dependsOn", "dependsOn")] {
-            if !target[key].as_array().is_some_and(Vec::is_empty) {
-                println!("    {label}: {}", list(&target[key]));
-            }
+        for key in ["inputs", "outputs", "dependsOn"] {
+            println!("    {key}: {}", list(&target[key]));
         }
     }
 }
