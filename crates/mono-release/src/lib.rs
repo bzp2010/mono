@@ -1,8 +1,10 @@
 //! Release planning: change records, and the versions they imply.
 
+mod apply;
 mod plan;
 mod record;
 
+pub use apply::{apply_plan, ApplyError, ApplyTarget};
 pub use plan::{compute_plan, Release};
 pub use record::{parse_record, Bump, ChangeRecord};
 
