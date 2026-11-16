@@ -77,3 +77,23 @@ fn a_project_without_a_version_is_an_error() {
     let record = parse_record("---\n\"lib\": patch\n---\n\nx\n").unwrap();
     assert!(compute_plan(&[record], &versions(&[]), &dependents(&[])).is_err());
 }
+
+#[test]
+fn a_dependency_cycle_terminates() {
+    let record = parse_record("---\n\"a\": minor\n---\n\nx\n").unwrap();
+    let plan = compute_plan(
+        &[record],
+        &versions(&[("a", "1.0.0"), ("b", "1.0.0")]),
+        &dependents(&[("a", &["b"]), ("b", &["a"])]),
+    )
+    .unwrap();
+    assert_eq!(plan["a"].bump, Bump::Minor);
+    assert_eq!(plan["b"].bump, Bump::Patch);
+}
+
+#[test]
+fn a_self_dependency_terminates() {
+    let record = parse_record("---\n\"a\": patch\n---\n\nx\n").unwrap();
+    let plan = compute_plan(&[record], &versions(&[("a", "1.0.0")]), &dependents(&[("a", &["a"])])).unwrap();
+    assert_eq!(plan["a"].bump, Bump::Patch);
+}

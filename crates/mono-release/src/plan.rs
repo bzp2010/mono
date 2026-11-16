@@ -40,11 +40,10 @@ pub fn compute_plan(
     while let Some(project) = queue.pop() {
         for dependent in dependents.get(&project).into_iter().flatten() {
             ensure_known(versions, dependent)?;
-            let entry = bumps.entry(dependent.clone()).or_insert(Bump::Patch);
-            if *entry < Bump::Patch {
-                *entry = Bump::Patch;
-            }
-            if !queue.contains(dependent) {
+            // A project is queued the first time it gets a bump, so each project is
+            // processed once and a dependency cycle cannot loop forever.
+            if !bumps.contains_key(dependent) {
+                bumps.insert(dependent.clone(), Bump::Patch);
                 queue.push(dependent.clone());
             }
         }
