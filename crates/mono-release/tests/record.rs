@@ -18,3 +18,21 @@ fn an_unknown_bump_keyword_is_an_error() {
 fn a_record_without_frontmatter_is_an_error() {
     assert!(parse_record("just a summary\n").is_err());
 }
+
+#[test]
+fn crlf_line_endings_are_accepted() {
+    let record = parse_record("---\r\n\"my-lib\": patch\r\n---\r\n\r\nFixed it.\r\n").unwrap();
+    assert_eq!(record.bumps.get("my-lib"), Some(&Bump::Patch));
+    assert_eq!(record.summary.trim(), "Fixed it.");
+}
+
+#[test]
+fn a_closing_delimiter_must_be_a_whole_line() {
+    assert!(parse_record("---\n\"my-lib\": patch\n---oops\nbody\n").is_err());
+}
+
+#[test]
+fn a_record_may_end_at_the_closing_delimiter() {
+    let record = parse_record("---\n\"my-lib\": patch\n---").unwrap();
+    assert_eq!(record.summary, "");
+}
