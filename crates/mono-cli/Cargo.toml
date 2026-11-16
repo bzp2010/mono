@@ -23,4 +23,5 @@ mono-discover = { path = "../mono-discover" }
 mono-graph = { path = "../mono-graph" }
 mono-task = { path = "../mono-task" }
 mono-vcs-git = { path = "../mono-vcs-git" }
+serde_json = "1"
 thiserror = "2"

@@ -28,6 +28,7 @@ fn graph_in(root: &Path, a_cmd: &str, b_cmd: &str) -> ProjectGraph {
             root: dir_a,
             ecosystem: Ecosystem::Npm,
             dependencies: vec![],
+            version: None,
         },
         DiscoveredProject {
             name: Some("b".into()),
@@ -35,6 +36,7 @@ fn graph_in(root: &Path, a_cmd: &str, b_cmd: &str) -> ProjectGraph {
             root: dir_b,
             ecosystem: Ecosystem::Npm,
             dependencies: vec!["a".into()],
+            version: None,
         },
     ];
     let mut configs = BTreeMap::new();

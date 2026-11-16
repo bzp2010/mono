@@ -12,6 +12,10 @@ pub struct Project {
     pub name: String,
     pub root: PathBuf,
     pub ecosystem: Ecosystem,
+    /// The name other packages use for this project in dependency specs, if any.
+    pub package_name: Option<String>,
+    /// The version the ecosystem declares for the project, if any.
+    pub version: Option<String>,
     pub targets: BTreeMap<String, TargetConfig>,
 }
 
@@ -54,6 +58,15 @@ impl ProjectGraph {
     /// Direct dependencies of a project, inferred first, then explicit.
     pub fn deps_of(&self, name: &str) -> &[String] {
         self.deps.get(name).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// Projects that directly depend on `name`, in name order.
+    pub fn dependents_of(&self, name: &str) -> Vec<&str> {
+        self.deps
+            .iter()
+            .filter(|(_, deps)| deps.iter().any(|d| d == name))
+            .map(|(project, _)| project.as_str())
+            .collect()
     }
 
     /// Projects ordered so that every project appears after its dependencies.
@@ -132,6 +145,8 @@ pub fn build(
                 name: name.clone(),
                 root: d.root.clone(),
                 ecosystem: d.ecosystem,
+                package_name: d.package_name.clone(),
+                version: d.version.clone(),
                 targets: configs.get(name).map(|c| c.targets.clone()).unwrap_or_default(),
             },
         );

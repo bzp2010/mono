@@ -27,6 +27,29 @@ enum Command {
     },
     /// Print the project graph in dependency order.
     Graph,
+    /// Show metadata about the projects of the workspace.
+    Show {
+        #[command(subcommand)]
+        what: Show,
+    },
+}
+
+#[derive(Subcommand)]
+enum Show {
+    /// List the names of all projects.
+    Projects {
+        /// Print a JSON array instead of one name per line.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the metadata of one project: location, version, dependencies, and targets.
+    Project {
+        /// Project name, as printed by `mono show projects`.
+        name: String,
+        /// Print a JSON object instead of text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() {
@@ -36,6 +59,8 @@ fn main() {
             commands::run::run(&target, affected.then_some(base.as_str()))
         }
         Command::Graph => commands::graph::graph(),
+        Command::Show { what: Show::Projects { json } } => commands::show::projects(json),
+        Command::Show { what: Show::Project { name, json } } => commands::show::project(&name, json),
     };
     match result {
         Ok(code) => std::process::exit(code),

@@ -35,11 +35,26 @@ pub fn discover_cargo(root: &Path) -> Result<Vec<DiscoveredProject>, DiscoverErr
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
+    let version = shared_version(&meta);
     Ok(vec![DiscoveredProject {
         name: Some(name),
         package_name: None,
         root: workspace_root,
         ecosystem: Ecosystem::Cargo,
         dependencies: Vec::new(),
+        version,
     }])
+}
+
+/// The version shared by every package of the workspace. When the packages declare
+/// different versions, or there are none, the project has no single version.
+fn shared_version(meta: &serde_json::Value) -> Option<String> {
+    let members = meta["workspace_members"].as_array()?;
+    let mut versions = meta["packages"]
+        .as_array()?
+        .iter()
+        .filter(|pkg| members.contains(&pkg["id"]))
+        .map(|pkg| pkg["version"].as_str());
+    let first = versions.next()??;
+    versions.all(|v| v == Some(first)).then(|| first.to_string())
 }

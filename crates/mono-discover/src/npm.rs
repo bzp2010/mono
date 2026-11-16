@@ -54,6 +54,7 @@ pub fn discover_npm(root: &Path) -> Result<Vec<DiscoveredProject>, DiscoverError
             root: dir.clone(),
             ecosystem: Ecosystem::Npm,
             dependencies,
+            version: pkg.version.clone(),
         });
     }
     Ok(projects)

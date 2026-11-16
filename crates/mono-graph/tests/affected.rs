@@ -11,6 +11,7 @@ fn proj(name: &str, root: &str, deps: &[&str]) -> DiscoveredProject {
         root: PathBuf::from(root),
         ecosystem: Ecosystem::Npm,
         dependencies: deps.iter().map(|d| d.to_string()).collect(),
+        version: None,
     }
 }
 
@@ -92,6 +93,7 @@ fn proj_in(name: &str, root: &str, ecosystem: Ecosystem) -> DiscoveredProject {
         root: PathBuf::from(root),
         ecosystem,
         dependencies: vec![],
+        version: None,
     }
 }
 

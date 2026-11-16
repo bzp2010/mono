@@ -24,12 +24,15 @@ pub enum CliError {
     Run(#[from] RunError),
     #[error(transparent)]
     Vcs(#[from] mono_vcs_git::VcsError),
+    #[error("unknown project {name}. Known projects: {known}")]
+    UnknownProject { name: String, known: String },
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
 
 /// A loaded workspace. Fields are added as subcommands need them.
 pub struct Workspace {
+    pub root: PathBuf,
     pub graph: ProjectGraph,
 }
 
@@ -66,5 +69,5 @@ pub fn load_workspace(root: &Path) -> Result<Workspace, CliError> {
         }
     }
     let graph = build(discovered, &configs)?;
-    Ok(Workspace { graph })
+    Ok(Workspace { root: root.to_path_buf(), graph })
 }

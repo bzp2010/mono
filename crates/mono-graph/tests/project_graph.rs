@@ -12,6 +12,7 @@ fn proj(name: &str, deps: &[&str]) -> DiscoveredProject {
         root: PathBuf::from(format!("/ws/{name}")),
         ecosystem: Ecosystem::Npm,
         dependencies: deps.iter().map(|d| d.to_string()).collect(),
+        version: None,
     }
 }
 
@@ -79,6 +80,7 @@ fn unnamed_project_is_error() {
         root: PathBuf::from("/ws/root"),
         ecosystem: Ecosystem::Npm,
         dependencies: vec![],
+        version: None,
     }];
     match build(discovered, &BTreeMap::new()).unwrap_err() {
         GraphError::UnnamedProject { root } => assert_eq!(root, PathBuf::from("/ws/root")),
@@ -97,6 +99,7 @@ fn dependency_on_a_package_name_resolves_to_the_project_name() {
             root: PathBuf::from("/ws/app"),
             ecosystem: Ecosystem::Npm,
             dependencies: vec!["@scope/lib".to_string()],
+            version: None,
         },
         DiscoveredProject {
             name: Some("lib".to_string()),
@@ -104,6 +107,7 @@ fn dependency_on_a_package_name_resolves_to_the_project_name() {
             root: PathBuf::from("/ws/lib"),
             ecosystem: Ecosystem::Npm,
             dependencies: vec![],
+            version: None,
         },
     ];
     let graph = build(discovered, &BTreeMap::new()).unwrap();
@@ -120,6 +124,7 @@ fn duplicate_package_names_are_error() {
             root: PathBuf::from("/ws/a"),
             ecosystem: Ecosystem::Npm,
             dependencies: vec![],
+            version: None,
         },
         DiscoveredProject {
             name: Some("b".to_string()),
@@ -127,10 +132,21 @@ fn duplicate_package_names_are_error() {
             root: PathBuf::from("/ws/b"),
             ecosystem: Ecosystem::Npm,
             dependencies: vec![],
+            version: None,
         },
     ];
     match build(discovered, &BTreeMap::new()).unwrap_err() {
         GraphError::DuplicatePackageName { package } => assert_eq!(package, "shared"),
         other => panic!("unexpected {other:?}"),
     }
+}
+
+#[test]
+fn dependents_are_the_direct_reverse_edges_in_name_order() {
+    let projects = vec![proj("a", &[]), proj("c", &["a"]), proj("b", &["a"]), proj("d", &["b"])];
+    let graph = build(projects, &BTreeMap::new()).unwrap();
+    assert_eq!(graph.dependents_of("a"), vec!["b", "c"]);
+    assert_eq!(graph.dependents_of("b"), vec!["d"]);
+    assert!(graph.dependents_of("d").is_empty());
+    assert!(graph.dependents_of("ghost").is_empty());
 }

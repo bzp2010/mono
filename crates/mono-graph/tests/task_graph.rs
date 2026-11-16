@@ -22,6 +22,7 @@ fn two_projects() -> ProjectGraph {
             root: PathBuf::from("/ws/a"),
             ecosystem: Ecosystem::Npm,
             dependencies: vec![],
+            version: None,
         },
         DiscoveredProject {
             name: Some("b".into()),
@@ -29,6 +30,7 @@ fn two_projects() -> ProjectGraph {
             root: PathBuf::from("/ws/b"),
             ecosystem: Ecosystem::Npm,
             dependencies: vec!["a".into()],
+            version: None,
         },
     ];
     let mut configs = BTreeMap::new();
@@ -72,6 +74,7 @@ fn missing_dependency_target_is_skipped() {
             root: PathBuf::from("/ws/a"),
             ecosystem: Ecosystem::Npm,
             dependencies: vec![],
+            version: None,
         },
         DiscoveredProject {
             name: Some("b".into()),
@@ -79,6 +82,7 @@ fn missing_dependency_target_is_skipped() {
             root: PathBuf::from("/ws/b"),
             ecosystem: Ecosystem::Npm,
             dependencies: vec!["a".into()],
+            version: None,
         },
     ];
     let configs: BTreeMap<_, _> = [(
@@ -102,6 +106,7 @@ fn same_project_dependency_on_missing_target_is_error() {
         root: PathBuf::from("/ws/a"),
         ecosystem: Ecosystem::Npm,
         dependencies: vec![],
+        version: None,
     }];
     let configs: BTreeMap<_, _> = [(
         "a".to_string(),
@@ -127,6 +132,7 @@ fn task_level_cycle_is_error() {
         root: PathBuf::from("/ws/a"),
         ecosystem: Ecosystem::Npm,
         dependencies: vec![],
+        version: None,
     }];
     let configs: BTreeMap<_, _> = [(
         "a".to_string(),

@@ -63,6 +63,7 @@ pub fn discover_pnpm(root: &Path) -> Result<Vec<DiscoveredProject>, DiscoverErro
             root: dir.clone(),
             ecosystem: Ecosystem::Pnpm,
             dependencies,
+            version: pkg.version.clone(),
         });
     }
     Ok(projects)
