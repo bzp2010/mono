@@ -124,3 +124,20 @@ fn a_project_at_the_workspace_root_has_root_dot() {
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(value["root"], ".");
 }
+
+#[test]
+fn a_cargo_project_shows_its_shared_version_and_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(root.join("mono.json"), r#"{"ecosystems":["cargo"]}"#).unwrap();
+    fs::write(root.join("Cargo.toml"), "[workspace]\nresolver = \"2\"\nmembers = [\"a\"]\n").unwrap();
+    fs::create_dir_all(root.join("a/src")).unwrap();
+    fs::write(root.join("a/src/lib.rs"), "").unwrap();
+    fs::write(root.join("a/Cargo.toml"), "[package]\nname = \"a\"\nversion = \"0.4.0\"\nedition = \"2021\"\n").unwrap();
+    let name = root.canonicalize().unwrap().file_name().unwrap().to_string_lossy().into_owned();
+    let out = mono(root).args(["show", "project", &name, "--json"]).output().unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["version"], "0.4.0");
+    assert_eq!(value["ecosystem"], "cargo");
+    assert_eq!(value["root"], ".");
+}
