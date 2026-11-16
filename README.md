@@ -16,6 +16,8 @@ Status: early development. The tool already manages this repository. Expect brea
 
 ```sh
 mono graph            # print projects, dependencies first
+mono show projects    # list project names
+mono show project <name>  # metadata of one project (add --json for machines)
 mono run build        # run the build target across the graph
 ```
 

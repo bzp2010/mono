@@ -331,6 +331,7 @@ dependencies = [
  "mono-task",
  "mono-vcs-git",
  "predicates",
+ "serde_json",
  "tempfile",
  "thiserror",
  "walkdir",

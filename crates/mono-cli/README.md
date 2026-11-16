@@ -7,6 +7,8 @@ The `mono` binary. It parses arguments, finds the workspace, and calls the libra
 - `mono run <target>`: runs the target across the graph. Prints `<project>:<target>: ok` or `: cached` for each executed task.
 - `mono run <target> --affected [--base <rev>]`: runs the target only in projects affected by changes, which are the changed projects and the projects that depend on them. A change to a workspace input such as `Cargo.lock` or `pnpm-lock.yaml` affects every project of its ecosystem, and `mono.json` affects every project. The dependencies of the affected tasks are planned too, since their outputs and cache keys are inputs of the affected tasks. Changes are measured against `<rev>`, which defaults to `HEAD`, so uncommitted changes count. In CI, pass the base branch as `--base`.
 - `mono graph`: prints one line per project in dependency order, as `name` or `name -> dep1, dep2`.
+- `mono show projects [--json]`: one project name per line, or a JSON array.
+- `mono show project <name> [--json]`: the metadata of one project. It prints the name, package name, version, ecosystem, root (relative to the workspace, `.` for the workspace root), direct dependencies, direct dependents, and each target with its command, inputs, outputs, and `dependsOn`. Absent values print as `(none)` in text and as `null` in JSON. An unknown name is an error that lists the known names. The JSON keys are `name`, `package`, `version`, `ecosystem`, `root`, `dependencies`, `dependents`, and `targets`.
 - `mono --version`.
 
 ## Exit codes
